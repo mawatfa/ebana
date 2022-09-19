@@ -16,10 +16,11 @@ class SGD():
 
     def step(self, X):
         for layer in self.model.computation_graph:
-            if layer.grad and layer.trainable:
-                update = layer.voltage_drops / self.model.batch_size
-                new_weights = layer.w - layer.lr / self.scale_factor * update
-                layer.w = np.clip(new_weights, 0.00001, 1)
+            if layer.trainable:
+                if layer.layer_kind == 'dense_layer':
+                    update = layer.voltage_drops / self.model.batch_size
+                    new_weights = layer.w - layer.lr / self.scale_factor * update
+                    layer.w = np.clip(new_weights, 0.0000001, 1)
 
 class SGDMomentum():
     def __init__(self, model, scale_factor=0.001, momentum=0.9):
@@ -33,13 +34,14 @@ class SGDMomentum():
 
     def step(self, X):
         for layer in self.model.computation_graph:
-            if layer.grad and layer.trainable:
-                update = layer.voltage_drops / self.model.batch_size
-                self.v[layer.name] = self.momentum * self.v[layer.name] + (1 - self.momentum) * update
-                new_weights = layer.w - layer.lr / self.scale_factor * self.v[layer.name]
-                #self.v[layer.name] = self.momentum * self.v[layer.name] - layer.lr / self.scale_factor * update
-                #new_weights = layer.w + self.v[layer.name]
-                layer.w = np.clip(new_weights, 0.00001, 1)
+            if layer.trainable:
+                if layer.layer_kind == 'dense_layer':
+                    update = layer.voltage_drops / self.model.batch_size
+                    self.v[layer.name] = self.momentum * self.v[layer.name] + (1 - self.momentum) * update
+                    new_weights = layer.w - layer.lr / self.scale_factor * self.v[layer.name]
+                    #self.v[layer.name] = self.momentum * self.v[layer.name] - layer.lr / self.scale_factor * update
+                    #new_weights = layer.w + self.v[layer.name]
+                    layer.w = np.clip(new_weights, 0.0000001, 1)
 
 class Adam():
     def __init__(self, model, scale_factor=0.001, beta1=0.5, beta2=0.5, eps=1e-8):
