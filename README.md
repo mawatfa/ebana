@@ -1,5 +1,14 @@
 # EBANA
 
+This repository contains the code of the framework presented in the paper
+"Energy-Based Analog Neural Network Framework" that was accepted in 2022
+edition of the [IEEE SOCC conference](https://www.ieee-socc.org/). A link to
+the paper will be included as soon as the paper is made available on
+[ieee.org](https://ieeexplore.ieee.org).
+
+Please note that this repository is still heavily under construction. We plan to
+include more examples on usage to demonstrate the flexibility of the framework.
+
 ## Introduction
 
 EBANA (**E**nergy-**B**ased **Ana**log Neural Network Framework) is a deep
@@ -8,7 +17,7 @@ the Equilibrium Propagation algorithm. It is built in the spirit of Keras with
 two goals in mind: ease-of-use and flexibility. By hiding the complexity
 inherent to machine learning and analog electronics behind a simple and
 intuitive API, the framework facilitates experimentation with different network
-topologies and the exploration of the various trade-offs that exist in the
+topologies and the exploration of the various tradeoffs that exist in the
 design space.
 
 For the Equilibrium Propagation algorithm, see this paper: https://arxiv.org/abs/1602.05179
@@ -17,7 +26,9 @@ For the Equilibrium Propagation algorithm, see this paper: https://arxiv.org/abs
 
 EBANA makes use of [Ngspice](http://ngspice.sourceforge.net/) for SPICE
 simulation, and [PySpice](https://pypi.org/project/PySpice) for
-interoperability between Python and Ngspice. Assuming you already have `conda`
+interoperability between Python and Ngspice.
+
+Assuming you already have `conda`
 installed (for example, through
 [miniconda](https://docs.conda.io/en/latest/miniconda.html)), the required
 packages can be installed using the code below:
@@ -37,15 +48,31 @@ git clone https://github.com/mawatfa/ebana.git
 
 ## Usage
 
-Constructing a neural network topology in EBANA follows the Keras syntax very
-closely. However, since this is analog, there are some minor differences, such
-as in the type of layers that can be used.
+The EBANA framework is largely made up of two parts: one for defining the
+network model, and the other for training in the analog domain. A block diagram
+of the framework is shown below.
+
+![block diagram](./media/framework.png)
+
+The process of designing and training a model in EBANA starts with defining the
+model. The general structure of an analog neural network that can be trained
+with EBANA is shown below. It consists of an input layer, several hidden
+layers, and an output layer. It looks similar to a regular neural network that
+can be trained by the backpropagation algorithm except for two major
+differences. First, the layers can influence each other bidirectionally.
+Second, the output nodes are linked to current sources which serve to inject
+loss gradient signals during training
+
+![model block](./media/model_block.png)
+
+An example of a topology that can be used to learn the `xor` dataset
+is given below. The complete example for the `xor` training along with others
+can found in the [test_circuit](./test_circuits) directory.
 
 ### Building the network topology
 
-An example of a topology that can be used to learn the `xor` dataset is given
-below. The complete example for the `xor` training along with others can found
-in the [test_circuit](./test_circuits) directory.
+Constructing a neural network topology in EBANA follows the Keras syntax very
+closely.
 
 ```python
 # input layer
@@ -147,8 +174,8 @@ Three things need to be specified:
 
 ## Saving network state
 
-Having trained the model, it is possible to save weights, optimizer states, and
-loss history. This is done using the code below.
+Having trained the model, it is possible to save the weights, optimizer states,
+loss history, test dataset accuracy, etc. This is done using the code below.
 
 ```python
 optimizer.save_state('fashion_optimizer.pickle')
