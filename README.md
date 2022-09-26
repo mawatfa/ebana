@@ -4,7 +4,8 @@ This repository contains the code of the framework presented in the paper
 "Energy-Based Analog Neural Network Framework" that was accepted in 2022
 edition of the [IEEE SOCC conference](https://www.ieee-socc.org/). A link to
 the paper will be included as soon as the paper is made available on
-[ieee.org](https://ieeexplore.ieee.org).
+[ieee.org](https://ieeexplore.ieee.org). The paper can also be downloaded
+from this [link](https://hal.umontpellier.fr/hal-03775570).
 
 Please note that this repository is still heavily under construction. We plan to
 include more examples on usage to demonstrate the flexibility of the framework.
