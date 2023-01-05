@@ -2,19 +2,32 @@
 #                               imports                               #
 #######################################################################
 
+
 import sys
 import os
-PATH = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.dirname(PATH))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.analoglayers import InputVoltageLayer, BiasVoltageLayer, DenseLayer, DiodeLayer, AmplificationLayer, CurrentLayer, ConcatenateLayer
-from src.batchgenerator import BatchGenerator
-from src.analognn import Model
-import src.losses as losses
-import src.optimizers as optimizers
+from sklearn.preprocessing import OneHotEncoder
+from sklearn import preprocessing
+from sklearn.datasets import load_iris
 
-import numpy as np
 import pickle
+import numpy as np
+import src.metrics as metrics
+import src.optimizers as optimizers
+import src.losses as losses
+from src.analognn import Model
+from src.initializers import Initializers
+from src.batchgenerator import BatchGenerator
+from src.analoglayers import (
+    InputVoltageLayer,
+    BiasVoltageLayer,
+    DenseLayer,
+    DiodeLayer,
+    AmplificationLayer,
+    CurrentLayer,
+    ConcatenateLayer,
+)
 
 #######################################################################
 #                        fashion mnist dataset                        #
@@ -23,6 +36,10 @@ import pickle
 def load_fashion_dataset():
     # This is a custom dataset that was generated from the original fashion mnist
     # dataset in order to reduce the dimensionality
+
+    PATH = os.path.dirname(os.path.abspath(__file__))
+    sys.path.append(os.path.dirname(PATH))
+
     X_train = np.load(PATH + '/mnist_fashion/fashion_batchnorm_layer_x_train.npy')
     Y_train = np.load(PATH + '/mnist_fashion/fashion_batchnorm_layer_y_train.npy')
     X_test = np.load(PATH + '/mnist_fashion/fashion_batchnorm_layer_x_test.npy')
@@ -33,6 +50,12 @@ def load_fashion_dataset():
 
     return (X_train, Y_train),( X_test, Y_test)
 
+
+#######################################################################
+#                             model setup                             #
+#######################################################################
+
+
 if __name__ == "__main__":
 
     #######################################################################
@@ -41,6 +64,10 @@ if __name__ == "__main__":
 
     # inputs to the model
     (X_train, Y_train),( X_test, Y_test) = load_fashion_dataset()
+
+    # shift output levels
+    output_shift = 0
+    output_midpoint = 0.5
 
     # construct dataset
     train_dataset = {
@@ -67,62 +94,116 @@ if __name__ == "__main__":
     hidden_2_units = 100
     output_units = Y_train.shape[-1]
 
-    # bias voltages
-    bias1 = np.zeros(shape=(1, )) + 1
-    bias2 = np.zeros(shape=(1, )) + 1
-    bias3 = np.zeros(shape=(1, )) + 1
+    #######################################################################
+    #                         circuit parameters                          #
+    #######################################################################
+
+    ###################
+    #  bias voltages  #
+    ###################
+
+    bias_p = np.array([0]) + 1
+    bias_n = np.array([0]) - 1
 
     # bias voltages of nonlinearity layers
-    a1_bias = np.zeros(shape=(hidden_1_units, )) + 0.0
-    a2_bias = np.zeros(shape=(hidden_2_units, )) - 0.0
+    diode_bias_down = np.zeros(shape=(hidden_1_units,))
+    diode_bias_up = np.zeros(shape=(hidden_1_units,))
+
+    ############
+    #  weight  #
+    ############
+
+    weight_initialzier = Initializers(
+        init_type="glorot", params={"L": 1e-7, "U": 8e-6, "g_max": 2e-5, "g_min": 1e-7}
+    )
+
+    ##################
+    #  nonlinearity  #
+    ##################
+
+    behaviorial_diode_param = {"VTH": 0.1, "RON": 1.0}
+
+    real_diode_param = {
+        "path": "./spice_models/diodes.lib",
+        "model_name": "1N4148",
+    }
+
+    mos_model = {
+        "path": "./spice_models/NMOS_VTG.inc",
+        "model_name": "NMOS_VTG",
+        "length": 50e-9,
+        "width": 200e-9,
+    }
+
+    ###############
+    #  amplifier  #
+    ###############
+
+    amp_param = {"shift": 0, "gain": 4}
+
+    ##############
+    #  training  #
+    ##############
+
+    beta = 1e-6
 
     #######################################################################
     #                             build model                             #
     #######################################################################
 
-
-    xp = InputVoltageLayer(units=input_units, name='xp', trainable=False)
-    #xn = InputVoltageLayer(units=input_units, name='xn', trainable=True)
-    b1 = BiasVoltageLayer(units=1, name='b1', bias_voltage=bias1, trainable=False)
-    j1 = ConcatenateLayer(name='j1')([xp, b1])
+    # input layer
+    xp = InputVoltageLayer(units=input_units, name="xp")
+    # xn = InputVoltageLayer(units=input_units, name="xn")
+    b1_p = BiasVoltageLayer(units=1, name="b1_p", bias_voltage=bias_p)
+    b1_n = BiasVoltageLayer(units=1, name="b1_n", bias_voltage=bias_n)
+    j1 = ConcatenateLayer(name="j1")([xp, b1_p, b1_n])
 
     # hidden dense layer 1
-    d1 = DenseLayer(units=hidden_1_units, lr=0.01, name='d1', init_type='glorot', trainable=True)(j1)
-    a1_1 = DiodeLayer(name='act1_1', direction='down', bias_voltage=a1_bias, trainable=False)(d1)
-    a1_2 = DiodeLayer(name='act1_2', direction='up', bias_voltage=-a1_bias, trainable=False)(a1_1)
-    g1 = AmplificationLayer(gain=4, name='amp1')(a1_2)
+    d1 = DenseLayer(units=hidden_1_units, lr=5e-7, name="d1", initializer=weight_initialzier, trainable=True)(j1)
+    a1_1 = DiodeLayer(name="act1_1", direction="down", bias_voltage=diode_bias_down, kind="behavioral", param=behaviorial_diode_param)(d1)
+    a1_2 = DiodeLayer( name="act1_2", direction="up", bias_voltage=diode_bias_up, kind="behavioral", param=behaviorial_diode_param,)(a1_1)
+    g1 = AmplificationLayer(name="amp1", param=amp_param)(d1)
 
     # layer before output
-    b2 = BiasVoltageLayer(units=1, name='b3', bias_voltage=bias2, trainable=False)
-    j2 = ConcatenateLayer(name='j3')([g1, b2])
+    b2_p = BiasVoltageLayer(units=1, name="b2_p", bias_voltage=bias_p)
+    b2_n = BiasVoltageLayer(units=1, name="b2_n", bias_voltage=bias_n)
+    j2 = ConcatenateLayer(name="j2")([g1, b2_p, b2_n])
 
     # output layer
-    d_out = DenseLayer(units=2 * output_units, lr=0.0001, name='d3', init_type='glorot', trainable=True)(j2)
-    c_out = CurrentLayer(name='c1')(d_out)
+    d_out = DenseLayer(units=2*output_units, lr=5e-7, name="d_out", initializer=weight_initialzier, trainable=True)(j2)
+    c_out = CurrentLayer(name="c1")(d_out)
 
-    model = Model(inputs=[xp, b1, b2], outputs=[c_out])
+    model = Model(inputs=[xp, b1_p, b2_p, b1_n, b2_n], outputs=[c_out])
 
     #######################################################################
     #                                train                                #
     #######################################################################
+    save_name = "fashion_test"
 
-    optimizer = optimizers.Adam(model)
-    #optimizer.load_state('fashion_optimizer.pickle')
+    optimizer = optimizers.Adam(model, beta=beta)
+    # optimizer.load_state(f"{save_name}_like_model_optimizer.pickle")
 
-    loss_fn = losses.CrossEntropyLoss()
-    model.fit(train_dataloader, beta=0.01, epochs=1,
+    metrics = metrics.Metrics(
+        model,
+        # save_output_voltages="last",
+        # save_power_params="last",
+        verbose = True,
+        validate_every={"epoch_num": 5},
+    )
+
+    loss_fn = losses.MSE(output_midpoint=output_midpoint)
+
+    model.fit(
+        train_dataloader=train_dataloader,
+        beta=beta,
+        epochs=100,
         loss_fn=loss_fn,
         optimizer=optimizer,
         test_dataloader=test_dataloader,
-        validate_every = {'batch_num': 5},
-        )
-
-    #######################################################################
-    #                           evaluate model                            #
-    #######################################################################
-
-    optimizer.save_state('fashion_optimizer.pickle')
-    model.save_history('fashion_history.pickle')
+        metrics=metrics,
+    )
 
     predictions = model.evaluate(train_dataset, loss_fn=loss_fn)
-    predictions = model.evaluate(test_dataset, loss_fn=loss_fn)
+
+    optimizer.save_state(save_name + "_optimizer.pickle")
+    model.save_history(save_name + "_history.pickle")

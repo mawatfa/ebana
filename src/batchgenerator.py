@@ -3,7 +3,6 @@
 #######################################################################
 
 import numpy as np
-import math
 
 #######################################################################
 #                generate sample batches from dataset                 #
@@ -22,7 +21,7 @@ class BatchGenerator:
             self.output_size[k] = v.shape[1]
             self.dataset_size = v.shape[0]
 
-        self.num_batches = np.int(np.floor(self.dataset_size / self.batch_size))
+        self.num_batches = int(np.floor(self.dataset_size / self.batch_size))
         self.batch_counter = self.num_batches
 
     def __len__(self):
@@ -67,5 +66,5 @@ class BatchGenerator:
 
     def update_batch(self, optimizer):
         for layer in optimizer.model.computation_graph:
-            if layer.layer_kind in ['input_voltage_layer']:
+            if layer.layer_type in ['input_voltage_layer']:
                 self.dataset['inputs'][layer.name][self.index - self.batch_size] -= 10000 * layer.voltage_drops

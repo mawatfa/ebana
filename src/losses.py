@@ -9,6 +9,9 @@ import numpy as np
 #######################################################################
 
 class MSE:
+    def __init__(self, output_midpoint=0):
+        self.output_midpoint = output_midpoint
+
     def __call__(self, output_node_voltages, target=None, beta=None, mode='train'):
         """
         Calculate losses and gradient currents according to the
@@ -34,7 +37,8 @@ class MSE:
         return prediction.reshape(1, -1)
 
     def verify_result(self, target, prediction):
-        c = np.product(np.equal(target, np.round(prediction, 0)), axis=1)
+        #c = np.product(np.equal(target, np.round(prediction, 0)), axis=1)
+        c = np.product(np.equal(target>=self.output_midpoint, prediction>=self.output_midpoint), axis=1)
         return c
 
 class BCE:

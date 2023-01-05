@@ -2,22 +2,33 @@
 #                               imports                               #
 #######################################################################
 
+
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.analoglayers import InputVoltageLayer, BiasVoltageLayer, DenseLayer, DiodeLayer, AmplificationLayer, CurrentLayer, ConcatenateLayer
-from src.batchgenerator import BatchGenerator
-from src.analognn import Model
-from src.utils import generate_voltage_values
-import src.losses as losses
-import src.optimizers as optimizers
-
-import numpy as np
 import pickle
+import numpy as np
+import src.metrics as metrics
+import src.optimizers as optimizers
+import src.losses as losses
+from src.analognn import Model
+from src.initializers import Initializers
+from src.utils import generate_voltage_values
+from src.batchgenerator import BatchGenerator
+from src.analoglayers import (
+    InputVoltageLayer,
+    BiasVoltageLayer,
+    DenseLayer,
+    DiodeLayer,
+    AmplificationLayer,
+    CurrentLayer,
+    ConcatenateLayer,
+)
+
 
 #######################################################################
-#                        digital gates dataset                        #
+#                             xor dataset                             #
 #######################################################################
 
 def make_digital_gates_dataset(bit_0_voltage, bit_1_voltage, count=2):
@@ -27,9 +38,11 @@ def make_digital_gates_dataset(bit_0_voltage, bit_1_voltage, count=2):
     XOR = np.array([[0],[1],[1],[0]])
     return X, [OR, AND, XOR]
 
+
 #######################################################################
 #                             model setup                             #
 #######################################################################
+
 
 if __name__ == "__main__":
 
@@ -39,6 +52,10 @@ if __name__ == "__main__":
 
     # inputs to the model
     X, Y = make_digital_gates_dataset(-2, 2)
+
+    # shift output levels
+    output_shift = 0
+    output_midpoint = 0.5
 
     # construct dataset
     train_dataset = {
@@ -67,60 +84,131 @@ if __name__ == "__main__":
     output_units_2 = Y[1].shape[-1]
     output_units_3 = Y[2].shape[-1]
 
-    # bias voltages
-    bias1 = np.zeros(shape=(1, )) + 1
-    bias2 = np.zeros(shape=(1, )) + 1
+    #######################################################################
+    #                         circuit parameters                          #
+    #######################################################################
+
+    ###################
+    #  bias voltages  #
+    ###################
+
+    bias_p = np.array([0]) + 1
+    bias_n = np.array([0]) - 1
 
     # bias voltages of nonlinearity layers
-    a1_bias = np.zeros(shape=(hidden_1_units, )) + 0.3
+    down_diode_bias = np.zeros(shape=(hidden_1_units, ))
+    up_diode_bias = np.zeros(shape=(hidden_1_units, ))
+
+    ############
+    #  weight  #
+    ############
+
+    weight_initialzier = Initializers(
+            init_type="glorot",
+            params = {
+                "L": 1e-7,
+                "U": 8e-6,
+                "g_max": 2e-5,
+                "g_min": 1e-7
+                }
+            )
+
+    ##################
+    #  nonlinearity  #
+    ##################
+
+    behaviorial_diode_param = {
+            "VTH": 0.3,
+            "RON": 1.0
+            }
+
+    real_diode_param = {
+            'path': "./spice_models/diodes.lib",
+            'model_name': "1N4148",
+            }
+
+    mos_model = {
+            'path': "./spice_models/NMOS_VTG.inc",
+            'model_name': "NMOS_VTG",
+            'length': 50e-9,
+            'width': 200e-9,
+            }
+
+    ###############
+    #  amplifier  #
+    ###############
+
+    amp_param = {"shift": 0, "gain": 4}
+
+    ##############
+    #  training  #
+    ##############
+
+    beta = 1e-7
 
     #######################################################################
     #                             build model                             #
     #######################################################################
 
     # input layer
-    xp = InputVoltageLayer(units=input_units, name='xp', trainable=False)
-    xn = InputVoltageLayer(units=input_units, name='xn', trainable=False)
-    b1 = BiasVoltageLayer(units=1, name='b1', bias_voltage=bias1, trainable=False)
-    j1 = ConcatenateLayer(name='j1')([xp, xn, b1])
+    xp  = InputVoltageLayer(units=input_units, name='xp')
+    xn = InputVoltageLayer(units=input_units, name='xn')
+    b1_p = BiasVoltageLayer(units=1, name='b1_p', bias_voltage=bias_p)
+    j1 = ConcatenateLayer(name='j1')([xp, xn, b1_p])
 
     # hidden dense layer 1
-    d1 = DenseLayer(units=hidden_1_units, lr=0.0001, name='d1', init_type='glorot', trainable=True)(j1)
-    a1_1 = DiodeLayer(name='act1_1', direction='down', bias_voltage=a1_bias, trainable=False)(d1)
-    a1_2 = DiodeLayer(name='act1_2', direction='up', bias_voltage=-a1_bias, trainable=False)(a1_1)
-    g1 = AmplificationLayer(gain=4, name='amp1')(a1_2)
+    d1 = DenseLayer(units=hidden_1_units, lr=4e-8, name='d1', initializer=weight_initialzier, trainable=True)(j1)
+    a1_1 = DiodeLayer(name='act1_1', direction='down', bias_voltage=down_diode_bias, trainable=False, kind="behavioral", param=behaviorial_diode_param)(d1)
+    a1_2 = DiodeLayer(name='act1_2', direction='up', bias_voltage=up_diode_bias, trainable=False, kind="behavioral", param=behaviorial_diode_param)(a1_1)
+    g1 = AmplificationLayer(name='amp1', param=amp_param)(d1)
 
     # layer before output
-    b2 = BiasVoltageLayer(units=1, name='b2', bias_voltage=bias2, trainable=False)
-    j2 = ConcatenateLayer(name='j3')([g1, b2])
+    b2_p = BiasVoltageLayer(units=1, name='b2_p', bias_voltage=bias_p)
+    j2 = ConcatenateLayer(name='j2')([g1, b2_p])
 
     # output dense layer 1
-    d_out1 = DenseLayer(units=2 * output_units_1, lr=0.0001, name='d_out1', init_type='glorot', trainable=True)(j2)
+    d_out1 = DenseLayer(units=2 * output_units_1, lr=4e-8, name='d_out1', initializer=weight_initialzier, trainable=True)(j2)
     c_out1 = CurrentLayer(name='or')(d_out1)
 
     # output dense layer 2
-    d_out2 = DenseLayer(units=2 * output_units_2, lr=0.0001, name='d_out2', init_type='glorot', trainable=True)(j2)
+    d_out2 = DenseLayer(units=2 * output_units_2, lr=4e-8, name='d_out2', initializer=weight_initialzier, trainable=True)(j2)
     c_out2 = CurrentLayer(name='and')(d_out2)
 
     # output dense layer 3
-    d_out3 = DenseLayer(units=2 * output_units_3, lr=0.0001, name='d_out3', init_type='glorot', trainable=True)(j2)
+    d_out3 = DenseLayer(units=2 * output_units_3, lr=4e-8, name='d_out3', initializer=weight_initialzier, trainable=True)(j2)
     c_out3 = CurrentLayer(name='xor')(d_out3)
 
-    model = Model(inputs=[xp, xn, b1, b2], outputs=[c_out1, c_out2, c_out3])
+    model = Model(inputs=[xp, xn, b1_p, b2_p], outputs=[c_out1, c_out2, c_out3])
 
     #######################################################################
     #                                train                                #
     #######################################################################
+    save_name = "digital_gates_test"
 
-    optimizer = optimizers.Adam(model)
-    #optimizer.load_state('digital_gates.pickle')
+    optimizer = optimizers.Adam(model, beta=beta)
+    #optimizer.load_state(f"{save_name}_optimizer.pickle")
 
-    loss_fn = losses.MSE()
-    model.fit(train_dataloader, beta=0.001, epochs=150,
-            loss_fn=loss_fn,
-            optimizer=optimizer,
-            test_dataloader=test_dataloader,
-            validate_every = {'epoch_num': 10})
+    metrics = metrics.Metrics(
+        model,
+        # save_output_voltages="last",
+        # save_power_params="last",
+        verbose = True,
+        validate_every={"epoch_num": 10},
+    )
 
-    optimizer.save_state('digital_gates_optimizer.pickle')
-    model.save_history('digital_gates_history.pickle')
+    loss_fn = losses.MSE(output_midpoint=output_midpoint)
+
+    model.fit(
+        train_dataloader=train_dataloader,
+        beta=beta,
+        epochs=50,
+        loss_fn=loss_fn,
+        optimizer=optimizer,
+        test_dataloader=test_dataloader,
+        metrics=metrics,
+    )
+
+    predictions = model.evaluate(train_dataset, loss_fn=loss_fn)
+
+    optimizer.save_state(save_name + "_optimizer.pickle")
+    model.save_history(save_name + "_history.pickle")
