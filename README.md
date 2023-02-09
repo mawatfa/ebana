@@ -58,39 +58,16 @@ start experimenting with the framework right away.
 
 To set up the ebana framework using docker, follow these steps:
 
-1. Create an empty directory and save the following code as a file named
-   `dockerfile`:
+1. Open a terminal and `cd` to the `docker-setup` directory.
 
-```
-FROM ubuntu:latest
+2. Run the command `docker build -t ebana .`. This will build an image with the
+   name `ebana` based on the instructions in the `dockerfile`. This process may
+   take a few minutes to complete.
 
-ARG USER=ebana-user
-
-RUN apt-get update && apt-get -y install sudo \
-    && apt-get install -y git wget vim ngspice libc6-dev\
-    && wget http://ftp.fr.debian.org/debian/pool/main/n/ngspice/libngspice0_30.2-1~bpo9+1_amd64.deb && apt install -y ./libngspice0_30.2-1~bpo9+1_amd64.deb \
-    && wget http://ftp.fr.debian.org/debian/pool/main/n/ngspice/libngspice0-dev_30.2-1~bpo9+1_amd64.deb && apt install -y ./libngspice0-dev_30.2-1~bpo9+1_amd64.deb \
-    && apt-get install -y python3 python3-pip \
-    && pip3 install pyspice scikit-learn
-
-RUN adduser --disabled-password \--gecos '' $USER \
-    && adduser $USER sudo \
-    && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-
-USER $USER
-
-RUN git clone https://github.com/mawatfa/ebana /home/$USER/ebana
-
-WORKDIR /home/$USER/ebana
-```
-
-2. In the same directory as the `dockerfile`, run the command `docker build -t
-  ebana .`. This will build an image with the name `ebana` based on the
-  instructions in the `dockerfile`. This process may take a few minutes to
-  complete.
 3. Once the image has been created, you can create a container by running
   `docker run -it --name ebana_container ebana`.
-4. If you need to reattach to the container after it has exited, use the
+
+  4. If you need to reattach to the container after it has exited, use the
   commands `docker container start ebana_container` and `docker attach
   ebana_container`.
 
