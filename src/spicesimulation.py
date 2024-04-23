@@ -26,10 +26,7 @@ class Spice:
 
     def __init__(self, model):
         self.model = model
-        if not hasattr(model, 'simulator'):
-            model.simulator = 'ngspice'
-        else:
-            model.simulator = 'xyce'
+        if model.simulator == 'xyce':
             PySpice.Spice.Simulation.CircuitSimulator.DEFAULT_SIMULATOR = "xyce-serial"
 
 

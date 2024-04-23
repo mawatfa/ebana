@@ -20,12 +20,13 @@ N_PROCESSES = 8
 
 
 class Model:
-    def __init__(self, inputs, outputs):
+    def __init__(self, inputs, outputs, simulator="ngspice"):
         """
         The model is a built as a graph, with some nodes designated as inputs, and others designated as outputs
         """
         self.inputs = inputs    # list of inputs to the network
         self.outputs = outputs  # list of outputs of the network
+        self.simulator = simulator
         self._build_computation_graph(inputs)
 
     def _build_computation_graph(self, inputs):
