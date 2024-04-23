@@ -43,7 +43,7 @@ def get_iris_dataset(scale=4, split_size=0.7):
     X = np.round(
         scale * preprocessing.MinMaxScaler(feature_range=(-1, 1)).fit_transform(X), 2
     )
-    Y = OneHotEncoder(sparse=False).fit_transform(Y.reshape(-1, 1))
+    Y = OneHotEncoder(sparse_output=False).fit_transform(Y.reshape(-1, 1))
 
     p = np.random.permutation(len(Y))
     X_shuffled, Y_shuffled = X[p], Y[p]
