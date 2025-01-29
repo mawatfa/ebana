@@ -1,225 +1,219 @@
-# EBANA
+# EBANA: Energy-Based Analog Neural Network Framework
 
-Welcome to the repository for the "Energy-Based Analog Neural Network
-Framework" presented in the 2022 edition of the IEEE SOCC conference. The
-associated paper can be accessed on [ieee
-explore](https://ieeexplore.ieee.org/document/9908086) or downloaded from this
-[link](https://hal.umontpellier.fr/hal-03775570).
+EBANA is a deep learning framework for training analog neural networks with
+algorithms that require only local signal access. Initially introduced in
+[Frontiers in
+Neuroscience](https://www.frontiersin.org/journals/computational-neuroscience/articles/10.3389/fncom.2023.1114651/full)
+, EBANA remains under active development. It currently supports Equilibrium
+Propagation but can accommodate any algorithm that needs only local data
+access. Inspired by Keras, EBANA seeks to make machine learning and analog
+electronics more accessible through an easy-to-use API. Users can experiment
+with different architectures and explore tradeoffs in the analog design space.
 
-This repository contains the code for the framework and is currently undergoing
-development. In the future, we plan to provide additional examples to further
-showcase the capabilities and versatility of the framework. We appreciate your
-interest in our work and hope that the provided code is of use to you."
-
-## Introduction
-
-EBANA (**E**nergy-**B**ased **Ana**log Neural Network Framework) is a deep
-learning framework designed to train analog neural networks using the
-Equilibrium Propagation algorithm. Inspired by the simplicity and flexibility
-of Keras, EBANA aims to make machine learning and analog electronics accessible
-to a wider audience by providing an easy-to-use and intuitive API. With EBANA,
-users can easily experiment with different network architectures and evaluate
-the tradeoffs that exist in the design space.
-
-For more information on the Equilibrium Propagation algorithm, please see this
-paper: https://arxiv.org/abs/1602.05179"
+For more details on Equilibrium Propagation, see [this
+paper](https://arxiv.org/abs/1602.05179) .
 
 ## Installation
 
-EBANA leverages the power of [Ngspice](http://ngspice.sourceforge.net/) for
-SPICE simulation and utilizes [PySpice](https://pypi.org/project/PySpice) to
-provide seamless interoperability between Python and Ngspice.
+EBANA is written in Python and relies on SPICE simulation for accurate
+simulation of circuit dynamics.
 
-### Conda
+**Steps:**
 
-Assuming you already have `conda`
-installed (for example, through
-[miniconda](https://docs.conda.io/en/latest/miniconda.html)), the required
-packages can be installed using the code below:
+1. **Install PySpice**
 
 ```bash
-conda create -n ebana
-conda activate ebana
-conda install -c conda-forge pyspice
-conda install -c conda-forge ngspice ngspice-lib
+git clone https://github.com/medwatt/PySpice
+cd PySpice
+pip install .
 ```
 
-The next step is to make a clone of this repository:
+2. **Clone the EBANA framework**
 
 ```bash
-git clone https://github.com/mawatfa/ebana.git
+git clone https://github.com/mawatfa/ebana
 ```
 
-### Docker
+3. **Install ngspice** (operating system dependent). For example, on Arch Linux:
 
-The easiest way to try out the ebana framework is through Docker. This allows
-you to quickly set up the necessary environment and dependencies, so you can
-start experimenting with the framework right away.
-
-To set up the ebana framework using docker, follow these steps:
-
-1. Open a terminal and `cd` to the `docker-setup` directory.
-
-2. Run the command `docker build -t ebana .`. This will build an image with the
-   name `ebana` based on the instructions in the `dockerfile`. This process may
-   take a few minutes to complete.
-
-3. Once the image has been created, you can create a container by running
-  `docker run -it --name ebana_container ebana`.
-
-  4. If you need to reattach to the container after it has exited, use the
-  commands `docker container start ebana_container` and `docker attach
-  ebana_container`.
-
+```bash
+pacman -Syu ngspice
+```
 
 ## Usage
 
-The EBANA framework is largely made up of two parts: one for defining the
-network model, and the other for training in the analog domain. A block diagram
-of the framework is shown below.
+### Building The Model
 
-![block diagram](./media/framework.png)
-
-The process of designing and training a model in EBANA starts with defining the
-model. The general structure of an analog neural network that can be trained
-with EBANA is shown below. It consists of an input layer, several hidden
-layers, and an output layer. It looks similar to a regular neural network that
-can be trained by the backpropagation algorithm except for two major
-differences. First, the layers can influence each other bidirectionally.
-Second, the output nodes are linked to current sources which serve to inject
-loss gradient signals during training
-
-![model block](./media/model_block.png)
-
-An example of a topology that can be used to learn the `xor` dataset
-is given below. The complete example for the `xor` training along with others
-can found in the [test_circuit](./test_circuits) directory.
-
-### Building the network topology
-
-Constructing a neural network topology in EBANA follows the Keras syntax very
-closely.
+Creating and training models in EBANA resembles the Keras functional API. Below
+is an example of a model that learns the MNIST dataset.
 
 ```python
-# input layer
-xp  = InputVoltageLayer(units=input_units, name='xp')
-xn = InputVoltageLayer(units=input_units, name='xn')
-b1_p = BiasVoltageLayer(units=1, name='b1_p', bias_voltage=bias_p)
-b1_n = BiasVoltageLayer(units=1, name='b1_n', bias_voltage=bias_n)
-j1 = ConcatenateLayer(name='j1')([xp, xn, b1_p, b1_n])
+xp = DCVoltageLayer(units=input_units, name="xp")
+rp = ReshapeLayer(name="rxp", shape=(28, 28))(xp)
 
-# hidden dense layer 1
-d1 = DenseLayer(units=hidden_1_units, lr=4e-8, name='d1', initializer=weight_initialzier, trainable=True)(j1)
-a1_1 = DiodeLayer(name='act1_1', direction='down', bias_voltage=down_diode_bias, trainable=False, kind="behavioral", param=behaviorial_diode_param)(d1)
-a1_2 = DiodeLayer(name='act1_2', direction='up', bias_voltage=up_diode_bias, trainable=False, kind="behavioral", param=behaviorial_diode_param)(a1_1)
-g1 = AmplificationLayer(name='amp1', param=amp_param)(d1)
+xn = DCVoltageLayer(units=input_units, name="xn")
+rn = ReshapeLayer(name="rxn", shape=(28, 28))(xn)
 
-# layer before last
-b2_p = BiasVoltageLayer(units=1, name='b2_p', bias_voltage=bias_p)
-b2_n = BiasVoltageLayer(units=1, name='b2_n', bias_voltage=bias_n)
-j2 = ConcatenateLayer(name='j2')([g1, b2_p, b2_n])
+j1 = StackLayer(name="j1", axis=-1)([rp, rn])
 
-# output layer
-d_out = DenseLayer(units=2 * output_units, lr=4e-8, name='d_out', initializer=weight_initialzier, trainable=True)(j2)
-c_out = CurrentLayer(name='xor')(d_out)
+d1 = LocallyConnected2DLayer(
+        name="d1",
+        kernel_size=(kernel_size, kernel_size),
+        stride=(stride, stride),
+        padding="valid",
+        filters=n_filters,
+        initializer=weight_initialzier,
+        lr=lr1,
+        trainable=True,
+        grad_func=grad_func,
+)(j1)
 
-model = Model(inputs=[xp, xn, b1_p, b2_p, b1_n, b2_n], outputs=[c_out])
+a1_1 = DiodeLayer(name="act1_1", direction="down", bias_voltage=diode_bias_down, kind="behavioral", param=behaviorial_diode_param, lr=1e-1, trainable=False)(d1)
+a1_2 = DiodeLayer(name="act1_2", direction="up", bias_voltage=diode_bias_up, kind="behavioral", param=behaviorial_diode_param, lr=1e-1, trainable=False)(a1_1)
+g1 = AmplificationLayer(name="amp1", param=amp_param)(a1_2)
+
+r2 = ReshapeLayer(name="reshape_g1", shape=(-1,))(g1)
+
+d_out = DenseLayer(units=2*output_units, lr=lr2, name="d_out", initializer=weight_initialzier, trainable=True grad_func=grad_func)(r2)
+
+c_out = CurrentNudgingLayer(name="c1", fold=True, activation=activation)(d_out)
+
+model = Model(
+        inputs=[xp, xn],
+        outputs=[c_out],
+        n_processes_train=ARGS['n_processes_train'],
+        n_processes_test=ARGS['n_processes_test'],
+)
 ```
 
-The network defined in the example above consists of four blocks:
+- Inputs arrive as voltages through two sources: `xp` and `xn`.
 
-1. The input block is where the inputs to the model are provided. In this case,
-   there are four input sources: `xp`, `xn`, `b1_p`, and `b1_n`.
-    - The `xor` dataset typically only has a single input source, represented
-      by `xp`.
-    - However, in analog circuits, negative weights are represented by
-      resistors with a positive value, so a second set of inputs with opposite
-      polarity is added, represented by `xn`.
-    - It is also common in analog neural networks to set the bias to values
-      other than 1, which is why there are input sources `b1_p` and `b1_n`.
-    - These four input sources are concatenated and passed to the next layer."
+- In analog circuits, resistors (or memristors) store weights and cannot
+  be negative. To capture negative connections, a second input with opposite
+  polarity (`xn`) is added.
 
-2. The second block is the first hidden layer, consisting of a dense layer, two
-   nonlinearity layers, and an amplification layer.
-   - The syntax for the dense layer is similar to that of Keras, with the added
-     ability to define a custom learning rate for each layer.
-   - The nonlinearity is implemented using two diode layers, which can be
-     customized using the parameters `bias_voltage`, `direction`, `model`, and
-     `use_mos`.
-   - In analog circuits, it is important to maintain the signal amplitude as it
-     passes through the components, which can be achieved using the
-     amplification layer with a customizable `gain` parameter."
+- The inputs are shaped and stacked to form `(28, 28, 2)` before feeding
+  them to `LocallyConnected2DLayer`.
 
-3. The third block simply takes the output from the previous layer, adds
-   a custom bias to it, and passes the result to the next layer.
+- A diode pair provides nonlinearity, and an amplification layer restores
+  the dynamic range.
 
-4. The last block is the output block, which is represented by a dense layer.
-   This layer is defined in a similar manner to the dense layer in the hidden
-   layer, with the exception that the number of output nodes is doubled to
-   account for negative weights. Additionally, a layer of current sources is
-   attached to the output node in order to inject current into the circuit
-   during the second phase of training. This injected current serves as the
-   loss gradient in the backpropagation algorithm.
+- The output is doubled so each class prediction is given by the voltage
+  difference of two nodes.
 
-### Training the model
+- Current sources at the output nodes inject gradients during training.
 
-Training the model is almost exactly the same as in Keras. An example is shown
-below.
+### Training
+
+Training follows Keras-like conventions:
 
 ```python
-save_name = "xor2_test"
-
+loss_fn = losses.CrossEntropyLoss(beta=beta)
 optimizer = optimizers.Adam(model, beta=beta)
-#optimizer.load_state(f"{save_name}_optimizer.pickle")
+# optimizer.load_state("optimizer_state_path")
 
-metrics = metrics.Metrics(
+metrics = Metrics(
     model,
-    # save_output_voltages="last",
-    # save_power_params="last",
-    verbose = True,
-    validate_every={"epoch_num": 10},
+    verbose=ARGS["verbose"],
+    save_phase_data=False,
+    save_batch_data=False,
+    save_injected_currents=False,
+    validate_every={"epoch_num": 1},
 )
-
-loss_fn = losses.MSE(output_midpoint=output_midpoint)
 
 model.fit(
     train_dataloader=train_dataloader,
-    beta=beta,
-    epochs=100,
+    epochs=num_epochs,
     loss_fn=loss_fn,
     optimizer=optimizer,
     test_dataloader=test_dataloader,
     metrics=metrics,
 )
 
-predictions = model.evaluate(train_dataset, loss_fn=loss_fn)
+# model.evaluate(test_dataset, loss_fn=loss_fn)
+# model.predict(test_dataset, loss_fn=loss_fn)
 ```
 
-Three things must be specified in order to train the model:
+Three key components:
 
-- The **optimizer**: at this stage, it is possible to load the optimizer state
-  from a previous run if you want to resume training or reuse some trained
-  layers.
-- **Metrics** for tracking loss and accuracy during simulation, saving voltages
-  and power parameters, etc.
-- The **loss function**, such as mean squared error (MSE), binary cross entropy
-  (BCE), or cross entropy (CrossEntropyLoss).
-- The **fit method**: This includes the specification of dataloaders for the
-  training and test datasets, the optimizer, loss function, number of epochs,
-  and the frequency at which the model should be validated against the test
-  dataset (e.g. after every n batches or epochs of training).
+- **Loss function**  (e.g., `CrossEntropyLoss`, `MSE`)
 
-## Saving network state
+- **Optimizer**  (e.g., `Adam`, `SGD`), which can load previous states
 
-Having trained the model, it is possible to save the weights, optimizer states,
-loss history, test dataset accuracy, etc. This is done using the code below.
+- **Metrics**  to track data during training
+
+### Saving History and Model State
+
+After training, save states and logs:
 
 ```python
 optimizer.save_state(save_name + "_optimizer.pickle")
 model.save_history(save_name + "_history.pickle")
 ```
 
-## Creating custom analog blocks
+### Creating Custom Layers
 
-New analog blocks can be easily created using PySpice. A short tutorial on the usage
-of PySpice can be found [here](./docs/pyspice/PySpice.ipynb).
+Custom layers follow this structure:
+
+```python
+class MyCustomLayer(BaseLayer):
+    def __init__(self, name:str, units:int, trainable:bool=False, save_sim_data:bool=True, grad_func=None, weight_upata_func=None):
+        super().__init__(
+            name,
+            units,
+            trainable=trainable,
+            save_sim_data=save_sim_data,
+            grad_func=grad_func,
+            weight_update_func=weight_upata_func,
+        )
+
+    def _define_shapes(self) -> None:
+        """Define the input and output shape."""
+
+    def _define_internal_nets(self) -> None:
+        """Net names for the SPICE subcircuit."""
+
+    def _define_external_nets(self) -> None:
+        """Net names for connecting with other layers."""
+
+    def _define_internal_branches(self) -> None:
+        """Branch names for measuring currents, if needed."""
+
+    def _build(self) -> None:
+        """Initialization for training variables, if needed."""
+
+    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index) -> None:
+        """Generate a subcircuit instance."""
+
+    def get_phase_data_spec(self) -> dict:
+        """Dimensions of data to be saved at the end of a phase."""
+
+    def get_batch_data_spec(self) -> dict:
+        """Dimensions of data to be saved at the end of a batch."""
+
+    def store_phase_data(self, sim_obj, phase):
+        """Store simulation results for a specific phase."""
+
+    def get_phase_data(self):
+        """Return stored phase data."""
+
+    def get_batch_data(self):
+        """Return stored batch data."""
+
+    def get_variables(self) -> dict:
+        """Return the state dict to be saved in the optimizer."""
+
+    def set_variables(self, optimizer_state):
+        """Restore internal variables from optimizer state."""
+
+    def get_training_data(self, phase):
+        """Return data for gradient computation."""
+
+    def default_grad_func(self, free, nudge):
+        """Calculate and return gradients."""
+
+    def default_weight_update_func(self, gradient, epoch_num, batch_num):
+        """Update internal weight variable using gradient."""
+```
+
+See `src/analog_layers` for concrete examples.
