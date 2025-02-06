@@ -34,10 +34,10 @@ pip install .
 git clone https://github.com/mawatfa/ebana
 ```
 
-3. **Install ngspice** (operating system dependent). For example, on Arch Linux:
+3. **Install ngspice** (operating system dependent). For example, on Ubuntu:
 
 ```bash
-pacman -Syu ngspice
+sudo apt install ngspice libngspice0-dev
 ```
 
 ## Usage
