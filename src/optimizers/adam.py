@@ -31,7 +31,7 @@ class Adam(BaseOptimizer):
                 self.s[layer.name] /= (1 - self.gamma_s ** self.k)
 
                 gradient = self.v[layer.name] / (np.sqrt(self.s[layer.name]) + self.eps)
-                layer.weight_update_func(gradient, self.model.epoch_num, self.model.batch_num)
+                layer.weight_update_func(gradient, self.model.epoch_num, self.model.batch_num, self.model.num_batches)
 
     def save_state(self, filepath):
         optimizer_state = {}

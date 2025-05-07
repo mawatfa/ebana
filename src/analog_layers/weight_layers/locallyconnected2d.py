@@ -3,6 +3,7 @@ import math
 from .dense_layers import DenseLayer
 from ..two_terminal_devices import TwoTerminals
 from ...utils.generating_functions import generate_names_from_shape
+from ...schedules import LearningRateSchedule
 
 
 class LocallyConnected2DLayer(TwoTerminals):
@@ -17,7 +18,7 @@ class LocallyConnected2DLayer(TwoTerminals):
         padding:str,
         filters:int,
         initializer=None,
-        lr:float=0.0,
+        lr:float|LearningRateSchedule=0.0,
         trainable:bool=True,
         save_sim_data:bool=True,
         grad_func=None,
@@ -263,8 +264,8 @@ class LocallyConnected2DLayer(TwoTerminals):
             data[oh, ow] += info["dense_layer"].get_training_data(phase)
         return data
 
-    def default_weight_update_func(self, gradient, epoch_num, batch_num):
+    def default_weight_update_func(self, gradient, epoch_num, batch_num, num_batches):
         for (oh, ow), info in self.patch_info.items():
-            info["dense_layer"].default_weight_update_func(gradient[oh, ow], epoch_num, batch_num)
+            info["dense_layer"].default_weight_update_func(gradient[oh, ow], epoch_num, batch_num, num_batches)
 
 

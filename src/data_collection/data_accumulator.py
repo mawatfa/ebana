@@ -75,9 +75,9 @@ class DataAccumulator:
 
             for layer in self.model.computation_graph:
 
+                # Save per phase data
                 if layer.save_sim_data:
                     if self.model.metrics.save_phase_data:
-                        # Save per phase data
                         layer_data = results[process_num]["process_layer_collected_data"][layer.name]
                         for phase_group in layer_data.keys():
                             for data_key in layer_data[phase_group].keys():
@@ -85,14 +85,16 @@ class DataAccumulator:
                                     data = layer_data[phase_group][data_key][phase]
                                     self.collector.store_phase_data(layer.name, phase_group, data_key, epoch_num, batch_num, phase, data)
 
-                    if self.model.metrics.save_batch_data:
-                        # Save per batch data
-                        for key in layer.get_batch_data_spec().keys():
-                            self.collector.store_batch_data(layer.name, key, epoch_num, batch_num, layer.get_batch_data()[key])
-
             if self.model.metrics.save_injected_currents:
                 for k, _ in self.output_nodes.items():
                     self.injected_currents[k][epoch_num][batch_num] += results[process_num]["process_injected_currents"][k]
+
+
+        # Save per batch data
+        for layer in self.model.computation_graph:
+            if self.model.metrics.save_batch_data:
+                for key in layer.get_batch_data_spec().keys():
+                    self.collector.store_batch_data(layer.name, key, epoch_num, batch_num, layer.get_batch_data()[key])
 
 
     def _save_variables_needing_aggregation(self, results, epoch_num, batch_num):

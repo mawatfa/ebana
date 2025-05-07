@@ -211,7 +211,7 @@ class BaseLayer(ABC):
         """
         raise NotImplementedError("default_grad_func must be implemented in the child class.")
 
-    def default_weight_update_func(self, gradient, epoch_num, batch_num) -> None:
+    def default_weight_update_func(self, gradient, epoch_num, batch_num, num_batches) -> None:
         """
         Specifies how the internal weight variable is modified using the gradient.
         Override as needed in child classes.

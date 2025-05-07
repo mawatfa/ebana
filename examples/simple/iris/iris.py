@@ -17,6 +17,7 @@ from src.analognn import Model
 from src.initializers import Initializers
 from src.dataset_handler import DataSet, BatchGenerator
 from src.metrics import Metrics
+from src.schedules import CosineDecay
 
 from src.analog_layers import (
     DCVoltageLayer,
@@ -39,17 +40,17 @@ ARGS = {
     "train_batch_size": 35,
     "test_batch_size": 45,
     "test_all": True,
-    "beta": 8e-9,
-    "lr1": 9.6e-10,
-    "lr2": 5.9e-11,
+    "beta": 2e-9,
+    "lr1": 5e-9,
+    "lr2": 5e-10,
     "layer_1_trainable": True,
     "layer_2_trainable": True,
     "optimizer": "sgd",
-    "loss": "mse",
+    "loss": "mseprob",
     "update_rule": "ep_sq",
     "quantization_bits": None,
     "quantization_scale": None,
-    "num_epoch": 20,
+    "num_epoch": 40,
     "validate_every_epoch": 1,
     "save_state": True,
     "load_state": False,
@@ -212,8 +213,8 @@ def train(arg_dict):
     #################
 
     #  bias voltages
-    bias_p = 0 + x_scale / 2 + voltage_shift
-    bias_n = 0 - x_scale / 2 + voltage_shift
+    bias_p = np.array([0]) + x_scale / 2 + voltage_shift
+    bias_n = np.array([0]) - x_scale / 2 + voltage_shift
 
     # bias voltages of nonlinearity layers
     diode_bias_down = 0 + voltage_shift
@@ -246,8 +247,19 @@ def train(arg_dict):
 
     # setup: training parameters <<<
     beta = ARGS["beta"]
-    lr1 = ARGS["lr1"]
-    lr2 = ARGS["lr2"]
+
+    lr1 = CosineDecay(
+        initial_learning_rate=ARGS["lr1"],
+        decay_steps=60,
+        alpha=1e-1,
+    )
+
+    lr2 = CosineDecay(
+        initial_learning_rate=ARGS["lr2"],
+        decay_steps=60,
+        alpha=1e-1,
+    )
+
     # >>>
 
     # loss function setup <<<
@@ -317,9 +329,9 @@ def train(arg_dict):
     metrics = Metrics(
         model,
         verbose=ARGS["verbose"],
-        save_phase_data=False,
-        save_batch_data=False,
-        save_injected_currents=False,
+        save_phase_data=True,
+        save_batch_data=True,
+        save_injected_currents=True,
         validate_every={"epoch_num": ARGS["validate_every_epoch"]},
     )
 

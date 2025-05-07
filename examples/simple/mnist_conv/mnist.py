@@ -13,6 +13,7 @@ from src.analognn import Model
 from src.initializers import Initializers
 from src.dataset_handler import DataSet, BatchGenerator
 from src.metrics import Metrics
+from src.schedules import CosineDecay
 
 from src.analog_layers import (
     DCVoltageLayer,

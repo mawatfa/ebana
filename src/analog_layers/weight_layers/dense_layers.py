@@ -2,6 +2,7 @@ import numpy as np
 from ..two_terminal_devices import TwoTerminals
 from ...netlist_generators.weight_layers import DenseResistorMatrix, DenseResistorMatrixMeasuringCurrent
 from ...utils.generating_functions import generate_names_from_shape
+from ...schedules import LearningRateSchedule, ConstantLearningRateSchedule
 
 
 class DenseLayer(TwoTerminals):
@@ -10,7 +11,7 @@ class DenseLayer(TwoTerminals):
         name:str,
         units:int,
         initializer=None,
-        lr:float=0.0,
+        lr:float|LearningRateSchedule=0.0,
         trainable:bool=True,
         save_sim_data:bool=True,
         grad_func=None,
@@ -28,6 +29,12 @@ class DenseLayer(TwoTerminals):
             grad_func=grad_func,
             weight_update_func=weight_upata_func,
         )
+
+        if isinstance(lr, float):
+            self.lr = ConstantLearningRateSchedule(lr)
+        else:
+            self.lr = lr
+
         if not self.save_currents:
             self.netlist_generator = DenseResistorMatrix
         else:
@@ -134,12 +141,12 @@ class DenseLayer(TwoTerminals):
     def default_grad_func(self, free, nudge):
         return (nudge) ** 2 - (free) ** 2
 
-    # def default_weight_update_func(self, gradient, epoch_num, batch_num):
-    #     w = self.w - self.lr * gradient
-    #     self.w = self.initializer.clip_conductances(w)
+    def default_weight_update_func(self, gradient, epoch_num, batch_num, num_batches):
+        step = epoch_num * num_batches + batch_num
 
-    def default_weight_update_func(self, gradient, epoch_num, batch_num):
-        w = self.w - self.lr * gradient
+        # Compute new weight
+        w = self.w -  self.lr(step) * gradient
+
         # Calculate the maximum allowed change (50% of w)
         max_change =  0.5 * abs(self.w)
 

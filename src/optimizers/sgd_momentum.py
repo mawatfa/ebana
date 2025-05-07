@@ -18,7 +18,7 @@ class SGDMomentum(BaseOptimizer):
             if layer.trainable:
                 update = layer.accumulated_gradient / (self.model.batch_size * self.beta)
                 self.v[layer.name] = self.momentum * self.v[layer.name] + (1 - self.momentum) * update
-                layer.weight_update_func(self.v[layer.name], self.model.epoch_num, self.model.batch_num)
+                layer.weight_update_func(self.v[layer.name], self.model.epoch_num, self.model.batch_num, self.model.num_batches)
 
     # def step(self):
     #     for layer in self.model.computation_graph:

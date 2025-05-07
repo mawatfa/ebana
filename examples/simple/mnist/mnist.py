@@ -46,7 +46,7 @@ ARGS = {
     "update_rule": "ep_sq",
     "quantization_bits": None,
     "quantization_scale": None,
-    "num_epoch": 50,
+    "num_epoch": 10,
     "validate_every_epoch": 1,
     "save_state": True,
     "load_state": False,
