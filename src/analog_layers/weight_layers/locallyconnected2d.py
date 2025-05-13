@@ -182,12 +182,18 @@ class LocallyConnected2DLayer(TwoTerminals):
         # We've already defined self.out_net_names in _define_internal_nets().
         pass
 
+    def _retrieve_weight(self):
+        self.w = np.zeros(shape=self.shape)
+        for (oh, ow), d in self.patch_info.items():
+            dense_layer = d["dense_layer"]
+            dense_layer._build()
+            self.w[oh, ow] = dense_layer.w
+
     def _build(self):
         """
         Build each patch's DenseLayer (initialize weights, etc.).
         """
-        for patch_layer in self.local_dense_layers:
-            patch_layer._build()
+        self._retrieve_weight()
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index: int) -> None:
         """
@@ -202,39 +208,57 @@ class LocallyConnected2DLayer(TwoTerminals):
     def get_phase_data_spec(self) -> dict:
         if not self.save_sim_data:
             return {}
-        specs = {}
-        for (oh, ow), info in self.patch_info.items():
-            specs[f"patch_{oh}_{ow}"] = info["dense_layer"].get_phase_data_spec()
-        return {}
+
+        input_shape = self.local_dense_layers[0].input_shape[0]
+        output_shape = self.local_dense_layers[0].output_shape[0]
+        num_layers = len(self.local_dense_layers)
+
+        specs = {
+            "voltages": {
+                "input": (num_layers, input_shape),
+                "output": (num_layers, output_shape),
+                }
+            }
+        return specs
 
     def get_batch_data_spec(self) -> dict:
         if not self.save_sim_data:
             return {}
-        specs = {}
-        for (oh, ow), info in self.patch_info.items():
-            specs[f"patch_{oh}_{ow}"] = info["dense_layer"].get_batch_data_spec()
-        return {}
+
+        return {
+            "w": self.shape
+        }
 
     def store_phase_data(self, sim_obj, phase):
+
+        input_shape = self.local_dense_layers[0].input_shape[0]
+        output_shape = self.local_dense_layers[0].output_shape[0]
+        num_layers = len(self.local_dense_layers)
+
+        input_voltages = np.zeros(shape=(num_layers, input_shape))
+        output_voltages = np.zeros(shape=(num_layers, output_shape))
+
         if self.save_sim_data:
-            for patch_layer in self.local_dense_layers:
+            for idx, patch_layer in enumerate(self.local_dense_layers):
                 patch_layer.store_phase_data(sim_obj, phase)
 
+                patch_input = patch_layer.voltages[phase]["input"]
+                patch_output = patch_layer.voltages[phase]["output"]
+
+                input_voltages[idx] = patch_input
+                output_voltages[idx] = patch_output
+
+            self.voltages[phase] = {
+                "input": input_voltages,
+                "output": output_voltages,
+            }
+
     def get_phase_data(self):
-        if not self.save_sim_data:
-            return {}
-        data = {}
-        for patch_layer in self.local_dense_layers:
-            data[patch_layer.name] = patch_layer.get_phase_data()["voltages"]
-        return {}
+        return {"voltages": self.voltages}
 
     def get_batch_data(self):
-        if not self.save_sim_data:
-            return {}
-        data = {}
-        for patch_layer in self.local_dense_layers:
-            data[patch_layer.name] = patch_layer.get_batch_data()
-        return {}
+        self._retrieve_weight()
+        return {"w": self.w}
 
     def get_variables(self) -> dict:
         """
