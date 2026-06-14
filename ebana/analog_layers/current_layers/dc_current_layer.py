@@ -49,8 +49,7 @@ class DCCurrentLayer(OneTerminal):
             else spice_input_dict[self.name][sample_index]
         )
 
-        circuit.subcircuit(DCCurrentSources(self.name, self.out_subcircuit_net_names, self.w))
-        circuit.X(self.name, self.name, *self.out_net_names)
+        circuit.X(self.name, tuple(self.out_net_names), subcircuit=DCCurrentSources(self.name, self.out_subcircuit_net_names, self.w))
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)

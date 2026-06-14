@@ -1,6 +1,9 @@
 # imports <<<
 import numpy as np
-from multiprocessing import Pool
+import multiprocessing
+
+# the workers inherit the model by forking
+Pool = multiprocessing.get_context("fork").Pool
 
 from ..dataset_handler import BatchGenerator
 from ..equiprop import EqProp
@@ -18,7 +21,7 @@ np.random.seed(111)
 class Model:
 
     # constructor <<<
-    def __init__(self, inputs, outputs, n_processes_train=1, n_processes_test=1, simulator='ngspice', simulation_kind='op'):
+    def __init__(self, inputs, outputs, n_processes_train=1, n_processes_test=1, simulation_kind='op'):
         """
         The model is a built as a graph, with some nodes designated as inputs, and others designated as outputs
         """
@@ -26,7 +29,6 @@ class Model:
         self.outputs = outputs                      # list of outputs of the network
         self.n_processes_train = n_processes_train  # number of parallel processes
         self.n_processes_test = n_processes_test    # number of parallel processes
-        self.set_simulator(simulator)
         self.set_simulation_type(simulation_kind)
         self.set_stopping_condition_loss(func=None)
         self.set_stopping_condition_accuracy(func=None)
@@ -61,10 +63,7 @@ class Model:
             queue.pop(0)
     # >>>
 
-    # simulator methods <<<
-    def set_simulator(self, simulator):
-        self.simulator = 'ngspice'
-
+    # simulation methods <<<
     def set_simulation_type(self, simulation_kind, sampling_time=None):
         self.simulation_kind = simulation_kind
         self.sampling_time = sampling_time

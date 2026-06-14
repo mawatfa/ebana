@@ -57,15 +57,13 @@ class DenseLayer(TwoTerminals):
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
 
-        circuit.subcircuit(
-            self.netlist_generator(
-                self.name,
-                self.in_subcircuit_net_names,
-                self.out_subcircuit_net_names,
-                np.round(1 / self.w, 4),
-            )
+        subcircuit = self.netlist_generator(
+            self.name,
+            self.in_subcircuit_net_names,
+            self.out_subcircuit_net_names,
+            np.round(1 / self.w, 4),
         )
-        circuit.X(self.name, self.name, *self.in_net_names, *self.out_net_names)
+        circuit.X(self.name, (*self.in_net_names, *self.out_net_names), subcircuit=subcircuit)
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)

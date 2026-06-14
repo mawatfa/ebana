@@ -24,20 +24,13 @@ class AmplificationLayer(TwoTerminals):
         self.w = np.zeros(self.shape) + self.param["gain"]
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
-        circuit.subcircuit(
-            BidirectionalAmplifier(
-                self.name,
-                self.in_subcircuit_net_names.flatten(),
-                self.out_subcircuit_net_names.flatten(),
-                self.param,
-            )
-        )
-        circuit.X(
+        subcircuit = BidirectionalAmplifier(
             self.name,
-            self.name,
-            *self.in_net_names.flatten(),
-            *self.out_net_names.flatten(),
+            self.in_subcircuit_net_names.flatten(),
+            self.out_subcircuit_net_names.flatten(),
+            self.param,
         )
+        circuit.X(self.name, (*self.in_net_names.flatten(), *self.out_net_names.flatten()), subcircuit=subcircuit)
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)

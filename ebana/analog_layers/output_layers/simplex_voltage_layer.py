@@ -30,8 +30,7 @@ class SimplexVoltageLayer(OneTerminal):
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
         current = np.zeros(shape=(self.units, ))
-        circuit.subcircuit(SimplexVoltage(self.name, self.out_subcircuit_net_names, self.vdd, self.vss, self.w))
-        circuit.X(self.name, self.name, *self.out_net_names)
+        circuit.X(self.name, tuple(self.out_net_names), subcircuit=SimplexVoltage(self.name, self.out_subcircuit_net_names, self.vdd, self.vss, self.w))
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)

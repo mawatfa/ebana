@@ -44,12 +44,12 @@ class DiodeLayer(OneTerminal):
             self.param,
         ]
         if self.kind == "behavioral":
-            circuit.subcircuit(DiodeBehavioral(*args))
+            subcircuit = DiodeBehavioral(*args)
         elif self.kind == "real":
-            circuit.subcircuit(DiodeReal(*args))
-            circuit.raw_spice = ".lib " + self.param['path']
+            subcircuit = DiodeReal(*args)
+            circuit.raw(".lib " + self.param['path'])
 
-        circuit.X(self.name, self.name, *self.out_net_names.flatten())
+        circuit.X(self.name, tuple(self.out_net_names.flatten()), subcircuit=subcircuit)
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)

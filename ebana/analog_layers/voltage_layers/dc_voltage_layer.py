@@ -19,8 +19,7 @@ class DCVoltageLayer(OneTerminal):
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
         voltages = self.input_voltages if self.input_voltages is not None else spice_input_dict[self.name][sample_index]
-        circuit.subcircuit(DCVoltageSources(self.name, self.out_subcircuit_net_names, voltages))
-        circuit.X(self.name, self.name, *self.out_net_names)
+        circuit.X(self.name, tuple(self.out_net_names), subcircuit=DCVoltageSources(self.name, self.out_subcircuit_net_names, voltages))
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)

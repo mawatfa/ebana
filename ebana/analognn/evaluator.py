@@ -1,6 +1,9 @@
 # imports <<<
 import numpy as np
-from multiprocessing import Pool
+import multiprocessing
+
+# the workers inherit the model by forking
+Pool = multiprocessing.get_context("fork").Pool
 from ..equiprop import EqProp
 from ..stat_reporting.accuracy import AccuracyReporter
 # >>>

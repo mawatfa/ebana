@@ -28,8 +28,7 @@ class CurrentNudgingLayer(OneTerminal):
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
         current = np.zeros(shape=self.shape)
-        circuit.subcircuit(DCCurrentSources(self.name, self.out_subcircuit_net_names, -current))
-        circuit.X(self.name, self.name, *self.out_net_names)
+        circuit.X(self.name, tuple(self.out_net_names), subcircuit=DCCurrentSources(self.name, self.out_subcircuit_net_names, -current))
 
     def get_layer_spice_output(self, sim_obj):
         return sim_obj.read_simulation_voltages(self.out_net_names)
