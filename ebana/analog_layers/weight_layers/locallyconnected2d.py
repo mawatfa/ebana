@@ -288,8 +288,8 @@ class LocallyConnected2DLayer(TwoTerminals):
             data[oh, ow] += info["dense_layer"].get_training_data(phase)
         return data
 
-    def default_weight_update_func(self, gradient, epoch_num, batch_num, num_batches):
+    def default_weight_update_func(self, update, step):
         for (oh, ow), info in self.patch_info.items():
-            info["dense_layer"].default_weight_update_func(gradient[oh, ow], epoch_num, batch_num, num_batches)
+            info["dense_layer"].default_weight_update_func(update[oh, ow], step)
 
 

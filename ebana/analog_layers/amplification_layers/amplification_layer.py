@@ -2,12 +2,13 @@ import numpy as np
 from ..two_terminal_devices import TwoTerminals
 from ...netlist_generators import BidirectionalAmplifier
 from ...utils.generating_functions import generate_names_from_shape
+from ...schedules import as_schedule
 
 
 class AmplificationLayer(TwoTerminals):
     def __init__(self, name, param, lr=0.0, trainable=False):
         self.param = param
-        self.lr = lr
+        self.lr = as_schedule(lr)
         super().__init__(name, trainable=trainable)
 
     def _define_shapes(self):
@@ -89,11 +90,8 @@ class AmplificationLayer(TwoTerminals):
     def default_grad_func(self, free, nudge):
         return nudge - free
 
-    def default_weight_update_func(self, gradient, epoch_num, batch_num):
-        # self.w -= self.lr * gradient
-
-        w = np.mean(self.w - self.lr * gradient)
+    def default_weight_update_func(self, update, step):
+        # all units share one gain
+        w = np.mean(self.w - self.lr(step) * update)
         self.w = np.zeros_like(self.w) + w
-
         self.param["gain"] = self.w[0]
-        print(self.w)

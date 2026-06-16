@@ -1,6 +1,7 @@
 import numpy as np
 from ..one_terminal_devices import OneTerminal
 from ...netlist_generators import DCCurrentSources
+from ...schedules import as_schedule
 
 
 class DCCurrentLayer(OneTerminal):
@@ -19,7 +20,7 @@ class DCCurrentLayer(OneTerminal):
         grad_func=None,
         weight_update_func=None,
     ):
-        self.lr = lr
+        self.lr = as_schedule(lr)
         self.initialize_currents = initialize_currents
         super().__init__(
             name,
@@ -97,5 +98,5 @@ class DCCurrentLayer(OneTerminal):
     def default_grad_func(self, free, nudge):
         return nudge - free
 
-    def default_weight_update_func(self, gradient, epoch_num, batch_num):
-        self.w -= self.lr * gradient
+    def default_weight_update_func(self, update, step):
+        self.w -= self.lr(step) * update

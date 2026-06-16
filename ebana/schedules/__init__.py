@@ -1,5 +1,11 @@
-from .learning_rate_schedule import (
+from .learning_rate import (
     LearningRateSchedule,
-    ConstantLearningRateSchedule,
+    as_schedule,
+    Constant,
+    ExponentialDecay,
+    InverseTimeDecay,
+    PiecewiseConstantDecay,
+    PolynomialDecay,
     CosineDecay,
+    CosineDecayRestarts,
 )

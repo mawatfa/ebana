@@ -2,6 +2,7 @@ import numpy as np
 from ..one_terminal_devices import OneTerminal
 from ...netlist_generators import DiodeBehavioral, DiodeReal
 from ...utils.generating_functions import generate_names_from_shape
+from ...schedules import as_schedule
 
 
 class DiodeLayer(OneTerminal):
@@ -19,7 +20,7 @@ class DiodeLayer(OneTerminal):
         self.direction = direction
         self.bias_voltage = bias_voltage
         self.kind = kind
-        self.lr = lr
+        self.lr = as_schedule(lr)
         self.param = param
         super().__init__(name, trainable=trainable, save_sim_data=save_sim_data)
 
@@ -112,7 +113,7 @@ class DiodeLayer(OneTerminal):
 
         return grad * diode_cond_dir_mask * cur_mag_mask
 
-    def default_weight_update_func(self, gradient, epoch_num, batch_num):
-        self.w -= self.lr * gradient
+    def default_weight_update_func(self, update, step):
+        self.w -= self.lr(step) * update
         # w = np.mean(self.w - self.lr * gradient)
         # self.w = np.zeros_like(self.w) + w

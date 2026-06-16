@@ -1,5 +1,6 @@
 import numpy as np
 from ..one_terminal_devices import OneTerminal
+from ...schedules import as_schedule
 
 # TODO: Needs Readjusting
 class SimplexVoltageLayer(OneTerminal):
@@ -7,7 +8,7 @@ class SimplexVoltageLayer(OneTerminal):
         """
         This layer defines currents sources that inject current into the network
         """
-        self.lr = lr
+        self.lr = as_schedule(lr)
         self.vdd = vdd
         self.vss = vss
         self.initializer = initializer
@@ -59,6 +60,6 @@ class SimplexVoltageLayer(OneTerminal):
     def default_grad_func(self, free, nudge):
         return (nudge) ** 2 - (free) ** 2
 
-    def default_weight_update_func(self, gradient, epoch_num, batch_num):
-        w = self.w - self.lr * gradient
+    def default_weight_update_func(self, update, step):
+        w = self.w - self.lr(step) * update
         self.w = self.initializer.clip_conductances(w)
