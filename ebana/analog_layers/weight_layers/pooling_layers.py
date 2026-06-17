@@ -17,7 +17,7 @@ class AveragePooling2DLayer(LocallyConnected2DLayer):
         padding="valid",
         initializer=None,
         lr: float = 0.0,
-        trainable: bool = True,
+        trainable: bool = False,
         save_sim_data: bool = True,
         grad_func=None,
         weight_update_func=None,
@@ -28,7 +28,7 @@ class AveragePooling2DLayer(LocallyConnected2DLayer):
             pool_size: (pool_height, pool_width).
             strides: (stride_height, stride_width). Defaults to pool_size if not provided.
             padding: "valid" or "same".
-            initializer: An object with init_high and init_low, used to pick the average weight.
+            initializer: Sets the (equal) conductances, e.g. initializers.Constant(1e-6).
             lr: Learning rate.
             trainable: Whether this layer is trainable.
             save_sim_data: Whether to save simulation data.
@@ -81,21 +81,3 @@ class AveragePooling2DLayer(LocallyConnected2DLayer):
         """
         super()._define_internal_nets()
 
-    def _build(self):
-        """
-        Build each patch's DenseLayer, then force all weights to the same value
-        based on the average of init_high and init_low.
-        """
-        # Let the normal build happen first
-        for patch_layer in self.local_dense_layers:
-            patch_layer._build()
-
-        # Force each weight to the same value
-        # (could be 1/(pool_size) if you prefer strict average, or simply an average of init_high/low)
-        if self.initializer is not None:
-            w = (self.initializer.init_high + self.initializer.init_low) / 2
-        else:
-            w = 1e-20  # fallback if no initializer is given
-
-        for patch_layer in self.local_dense_layers:
-            patch_layer.w = patch_layer.w * 0 + w

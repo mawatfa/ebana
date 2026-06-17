@@ -3,6 +3,7 @@ from ..two_terminal_devices import TwoTerminals
 from ...netlist_generators.weight_layers import DenseResistorMatrix, DenseResistorMatrixMeasuringCurrent
 from ...utils.generating_functions import generate_names_from_shape
 from ...schedules import LearningRateSchedule, as_schedule
+from ...constraints import MaxRelativeChange, as_constraint
 
 
 class DenseLayer(TwoTerminals):
@@ -15,10 +16,12 @@ class DenseLayer(TwoTerminals):
         trainable:bool=True,
         save_sim_data:bool=True,
         grad_func=None,
-        weight_upata_func=None,
+        weight_update_func=None,
         save_currents=False,
+        constraint=MaxRelativeChange(0.5),
     ):
         self.initializer = initializer
+        self.constraint = as_constraint(constraint)
         self.lr = lr
         self.save_currents = save_currents
         super().__init__(
@@ -27,7 +30,7 @@ class DenseLayer(TwoTerminals):
             trainable=trainable,
             save_sim_data=save_sim_data,
             grad_func=grad_func,
-            weight_update_func=weight_upata_func,
+            weight_update_func=weight_update_func,
         )
 
         self.lr = as_schedule(lr)
@@ -50,7 +53,9 @@ class DenseLayer(TwoTerminals):
 
 
     def _build(self):
-        self.w = self.initializer.initialize_weights(shape=self.shape)
+        if self.initializer is None:
+            raise ValueError(f"layer '{self.name}' needs an initializer")
+        self.w = self.initializer(self.shape)
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
 
@@ -137,16 +142,7 @@ class DenseLayer(TwoTerminals):
         return (nudge) ** 2 - (free) ** 2
 
     def default_weight_update_func(self, update, step):
-        # Compute new weight
-        w = self.w - self.lr(step) * update
-
-        # Calculate the maximum allowed change (50% of w)
-        max_change =  0.5 * abs(self.w)
-
-        # Limit the update to no more than 10% of the original value
-        delta = w - self.w
-        delta = delta.clip(-max_change, max_change)
-        self.w = self.initializer.clip_conductances(self.w + delta)
+        self.w = self.constraint(self.w - self.lr(step) * update, self.w)
 
 
 class DenseLayerBehavioral:

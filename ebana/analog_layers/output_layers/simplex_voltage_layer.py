@@ -1,10 +1,11 @@
 import numpy as np
 from ..one_terminal_devices import OneTerminal
 from ...schedules import as_schedule
+from ...constraints import as_constraint
 
 # TODO: Needs Readjusting
 class SimplexVoltageLayer(OneTerminal):
-    def __init__(self, name, vdd, vss, lr, initializer, trainable=False):
+    def __init__(self, name, vdd, vss, lr, initializer, trainable=False, constraint=None):
         """
         This layer defines currents sources that inject current into the network
         """
@@ -12,6 +13,7 @@ class SimplexVoltageLayer(OneTerminal):
         self.vdd = vdd
         self.vss = vss
         self.initializer = initializer
+        self.constraint = as_constraint(constraint)
         super().__init__(name=name, trainable=trainable)
         print(self.save_sim_data)
 
@@ -27,7 +29,7 @@ class SimplexVoltageLayer(OneTerminal):
         self.out_net_names = self.parent.out_net_names
 
     def _build(self):
-        self.w = self.initializer.initialize_weights(shape=(1,self.output_shape[0]+1))[0]
+        self.w = self.initializer((1, self.output_shape[0] + 1))[0]
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
         current = np.zeros(shape=(self.units, ))
@@ -62,4 +64,4 @@ class SimplexVoltageLayer(OneTerminal):
 
     def default_weight_update_func(self, update, step):
         w = self.w - self.lr(step) * update
-        self.w = self.initializer.clip_conductances(w)
+        self.w = self.constraint(w, self.w)

@@ -16,8 +16,6 @@ from ..data_storage.save_load_history import HistoryLoader
 from .evaluator import Evaluator
 # >>>
 
-np.random.seed(111)
-
 class Model:
 
     # constructor <<<

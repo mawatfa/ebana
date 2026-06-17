@@ -4,6 +4,7 @@ from .dense_layers import DenseLayer
 from ..two_terminal_devices import TwoTerminals
 from ...utils.generating_functions import generate_names_from_shape
 from ...schedules import LearningRateSchedule
+from ...constraints import MaxRelativeChange
 
 
 class LocallyConnected2DLayer(TwoTerminals):
@@ -23,6 +24,7 @@ class LocallyConnected2DLayer(TwoTerminals):
         save_sim_data:bool=True,
         grad_func=None,
         weight_update_func=None,
+        constraint=MaxRelativeChange(0.5),
     ):
         """
         Args:
@@ -31,12 +33,13 @@ class LocallyConnected2DLayer(TwoTerminals):
             stride: (stride_height, stride_width).
             padding: "valid" or "same"
             filters: Number of output channels per local patch.
-            initializer: Object with a method `initialize_weights(shape)`.
+            initializer: Initializer for each patch's (inputs, filters) weights.
             lr: Learning rate.
             trainable: Whether this layer is trainable.
             save_sim_data: Whether to save simulation data.
             grad_func: Custom gradient function if desired.
             weight_update_func: Custom weight update function if desired.
+            constraint: Constraint applied to each patch's weights after every update.
         """
         super().__init__(
             name=name,
@@ -50,6 +53,7 @@ class LocallyConnected2DLayer(TwoTerminals):
         self.padding = padding
         self.filters = filters
         self.initializer = initializer
+        self.constraint = constraint
         self.lr = lr
         self.paddded_net_name = f"{self.name}_pad"
 
@@ -158,7 +162,8 @@ class LocallyConnected2DLayer(TwoTerminals):
                     trainable=self.trainable,
                     save_sim_data=self.save_sim_data,
                     grad_func=self.grad_func,
-                    weight_upata_func=self.weight_update_func,
+                    weight_update_func=self.weight_update_func,
+                    constraint=self.constraint,
                 )
                 patch_layer.input_shape = (len(patch_in_nets),)
                 patch_layer.output_shape = (self.filters,)
@@ -182,18 +187,19 @@ class LocallyConnected2DLayer(TwoTerminals):
         # We've already defined self.out_net_names in _define_internal_nets().
         pass
 
-    def _retrieve_weight(self):
+    def _gather_weights(self):
+        """Collects the patch weights into self.w, shape (out_h, out_w, inputs, filters)."""
         self.w = np.zeros(shape=self.shape)
         for (oh, ow), d in self.patch_info.items():
-            dense_layer = d["dense_layer"]
-            dense_layer._build()
-            self.w[oh, ow] = dense_layer.w
+            self.w[oh, ow] = d["dense_layer"].w
 
     def _build(self):
         """
         Build each patch's DenseLayer (initialize weights, etc.).
         """
-        self._retrieve_weight()
+        for patch_layer in self.local_dense_layers:
+            patch_layer._build()
+        self._gather_weights()
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index: int) -> None:
         """
@@ -257,7 +263,7 @@ class LocallyConnected2DLayer(TwoTerminals):
         return {"voltages": self.voltages}
 
     def get_batch_data(self):
-        self._retrieve_weight()
+        self._gather_weights()
         return {"w": self.w}
 
     def get_variables(self) -> dict:
