@@ -85,7 +85,7 @@ class Evaluator:
         X = dataset.inputs
         Y = dataset.outputs
 
-        self.dataset_size = dataset.get_size()
+        self.dataset_size = len(dataset)
 
         # prepare arguments for the processes
         child_processes_args = []

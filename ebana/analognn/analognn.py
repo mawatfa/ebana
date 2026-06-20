@@ -5,7 +5,7 @@ import multiprocessing
 # the workers inherit the model by forking
 Pool = multiprocessing.get_context("fork").Pool
 
-from ..dataset_handler import BatchGenerator
+from ..dataset_handler import Dataset, DataLoader
 from ..equiprop import EqProp
 from ..spicesimulation import Spice
 from ..data_collection.data_accumulator import DataAccumulator
@@ -81,28 +81,9 @@ class Model:
         self.stopping_condition_accuracy_func = func
     # >>>
 
-    # batch skipping <<<
-    def _handle_batch_skipping(self, custom_begin: None | dict, dataloader: BatchGenerator) -> tuple[int, int]:
-        if custom_begin is not None:
-            custom_begin_epoch = custom_begin["epoch"]
-            custom_begin_batch = custom_begin["batch"]
-            self.load_history(custom_begin["history"])
-
-            for epoch_num in range(1, self.epochs):
-                for batch_num in range(1, self.num_batches):
-                    if epoch_num != custom_begin_epoch or self.batch_num != custom_begin_batch:
-                        next(dataloader)
-                    else:
-                        return epoch_num, batch_num
-        return 0, 0
-    # >>>
-
     # write netlist <<<
-    def write_netlist(self, dataloader: BatchGenerator, filename: "str") -> None:
-        spice = Spice(self)
-        training_batch = next(dataloader)
-        X = training_batch.inputs
-        spice.write_netlist(filename, X)
+    def write_netlist(self, dataset, filename, sample=0):
+        Spice(self).write_netlist(filename, dataset.inputs, sample)
     # >>>
 
     # history saver/loader <<<
@@ -114,14 +95,27 @@ class Model:
     # >>>
 
     # fit method <<<
-    def fit(self, *, train_dataloader, epochs, optimizer, metrics, loss_fn, test_dataloader=None, custom_begin=None):
+    def fit(
+        self,
+        *,
+        train_data: DataLoader,
+        epochs: int,
+        optimizer,
+        metrics,
+        loss_fn,
+        validation_data: Dataset | None = None,
+        initial_epoch: int = 0,
+    ):
+        """To resume, load the optimizer state and start at initial_epoch."""
+        if not 0 <= initial_epoch < epochs:
+            raise ValueError(f"need 0 <= initial_epoch < epochs, got {initial_epoch} and {epochs}")
         self.fit_method_called = True
-        self.dataset_size = train_dataloader.dataset_size
-        self.batch_size = train_dataloader.batch_size
-        self.output_nodes = train_dataloader.output_size
-        self.num_batches = train_dataloader.num_batches
-        self.train_dataloader = train_dataloader
-        self.test_dataloader = test_dataloader
+        self.dataset_size = len(train_data.dataset)
+        self.batch_size = train_data.batch_size
+        self.output_nodes = train_data.dataset.output_sizes
+        self.num_batches = len(train_data)
+        self.train_data = train_data
+        self.validation_data = validation_data
         self.epochs = epochs
         self.optimizer = optimizer
         self.metrics = metrics
@@ -133,17 +127,14 @@ class Model:
         self.training_validator = TrainingValidator(model=self, test_accuracy=self.accumulator.test_accuracy, metrics=self.metrics)
         self.history_loader = HistoryLoader(self.accumulator)
 
-        begin_epoch_num, begin_batch_num = self._handle_batch_skipping(custom_begin, self.train_dataloader)
         end_training = False
 
-        for epoch_num in range(begin_epoch_num, self.epochs):
+        for epoch_num in range(initial_epoch, self.epochs):
             self.epoch_num = epoch_num
 
-            for batch_num in range(begin_batch_num, self.num_batches):
+            for batch_num, training_batch in enumerate(train_data.batches(epoch_num)):
                 self.batch_num = batch_num + 1
 
-                # Get batch of samples
-                training_batch = next(self.train_dataloader)
                 # type: dict { key = input layer name, value = 2D numpy array of inputs }
                 X = training_batch.inputs
                 Y = training_batch.outputs
@@ -184,8 +175,8 @@ class Model:
                     self.loss_reporter.print_total_loss()
 
                 # Validate on test/validation dataset
-                if self.test_dataloader:
-                    self.training_validator.evaluate_validation(self.test_dataloader, epoch_num, batch_num)
+                if self.validation_data is not None:
+                    self.training_validator.evaluate_validation(self.validation_data, epoch_num, batch_num)
 
                     if self.stopping_condition_accuracy:
                         stop_condition = self.stopping_condition_accuracy_func(batch_num, epoch_num, self.accumulator.test_accuracy)

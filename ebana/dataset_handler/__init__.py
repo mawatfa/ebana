@@ -1,1 +1,2 @@
-from .batchgenerator import DataSet, BatchGenerator
+from .dataset import Dataset
+from .dataloader import DataLoader
