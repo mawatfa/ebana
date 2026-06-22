@@ -9,7 +9,7 @@ class AccuracyReporter:
         accuracy = {}
         for k in self.model.output_nodes.keys():
             c = self.model.loss_fn.verify_result(target[k], prediction[k])
-            accuracy[k] = np.round(np.mean(c), 2)
+            accuracy[k] = float(np.mean(c))
         return accuracy
 
     def print_accuracy(self, accuracy, verbose=False):

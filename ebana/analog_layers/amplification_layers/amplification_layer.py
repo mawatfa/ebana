@@ -1,15 +1,15 @@
 import numpy as np
 from ..two_terminal_devices import TwoTerminals
 from ...netlist_generators import BidirectionalAmplifier
-from ...utils.generating_functions import generate_names_from_shape
+from ...utils.generating_functions import numbered_names
 from ...schedules import as_schedule
 
 
 class AmplificationLayer(TwoTerminals):
-    def __init__(self, name, param, lr=0.0, trainable=False):
+    def __init__(self, name, param, lr=0.0, trainable=False, save_sim_data=False):
         self.param = param
         self.lr = as_schedule(lr)
-        super().__init__(name, trainable=trainable)
+        super().__init__(name, trainable=trainable, save_sim_data=save_sim_data)
 
     def _define_shapes(self):
         self.input_shape = self.parent.output_shape  # type: ignore
@@ -19,7 +19,7 @@ class AmplificationLayer(TwoTerminals):
     def _define_internal_branches(self):
         spice_letter = "b"
         prefix = f"{spice_letter}.x{self.name}.{spice_letter}"
-        self.branch_names = generate_names_from_shape(self.shape, prefix, use_underscore=False)
+        self.branch_names = numbered_names(self.shape, prefix)
 
     def _build(self) -> None:
         self.w = np.zeros(self.shape) + self.param["gain"]

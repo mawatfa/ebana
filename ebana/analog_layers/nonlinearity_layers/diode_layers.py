@@ -1,7 +1,7 @@
 import numpy as np
 from ..one_terminal_devices import OneTerminal
 from ...netlist_generators import DiodeBehavioral, DiodeReal
-from ...utils.generating_functions import generate_names_from_shape
+from ...utils.generating_functions import numbered_names
 from ...schedules import as_schedule
 
 
@@ -31,7 +31,7 @@ class DiodeLayer(OneTerminal):
     def _define_internal_branches(self):
         spice_letter = "v"
         prefix = f"{spice_letter}.x{self.name}.{spice_letter}"
-        self.branch_names = generate_names_from_shape(self.shape, prefix, use_underscore=False)
+        self.branch_names = numbered_names(self.shape, prefix)
 
     def _build(self):
         self.w = np.zeros(shape=self.shape) + self.bias_voltage
@@ -48,7 +48,7 @@ class DiodeLayer(OneTerminal):
             subcircuit = DiodeBehavioral(*args)
         elif self.kind == "real":
             subcircuit = DiodeReal(*args)
-            circuit.raw(".lib " + self.param['path'])
+            circuit.include(self.param['path'])
 
         circuit.X(self.name, tuple(self.out_net_names.flatten()), subcircuit=subcircuit)
 

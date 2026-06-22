@@ -19,7 +19,7 @@ from .evaluator import Evaluator
 class Model:
 
     # constructor <<<
-    def __init__(self, inputs, outputs, n_processes_train=1, n_processes_test=1, simulation_kind='op'):
+    def __init__(self, inputs, outputs, n_processes_train=1, n_processes_test=1):
         """
         The model is a built as a graph, with some nodes designated as inputs, and others designated as outputs
         """
@@ -27,7 +27,6 @@ class Model:
         self.outputs = outputs                      # list of outputs of the network
         self.n_processes_train = n_processes_train  # number of parallel processes
         self.n_processes_test = n_processes_test    # number of parallel processes
-        self.set_simulation_type(simulation_kind)
         self.set_stopping_condition_loss(func=None)
         self.set_stopping_condition_accuracy(func=None)
         self.adaptive_learning = None
@@ -59,12 +58,6 @@ class Model:
 
             visisted.append(current_layer)
             queue.pop(0)
-    # >>>
-
-    # simulation methods <<<
-    def set_simulation_type(self, simulation_kind, sampling_time=None):
-        self.simulation_kind = simulation_kind
-        self.sampling_time = sampling_time
     # >>>
 
     # adaptive learning methods <<<

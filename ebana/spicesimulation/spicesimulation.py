@@ -48,7 +48,7 @@ class Spice:
     # >>>
 
     # simulate circuit <<<
-    def simulate_circuit(self, mode="", circuit_update=None, batch_size=None):
+    def simulate_circuit(self, circuit_update=None):
         # without circuit_update the new circuit is loaded, otherwise the
         # alter commands are applied to the loaded one
         session = get_session()
@@ -61,95 +61,28 @@ class Spice:
             for command in circuit_update:
                 session.send_command(command)
 
-        if self.model.simulation_kind == "op":
-            session.run(simulations.OP())
+        session.run(simulations.OP())
 
-        elif self.model.simulation_kind == "tran":
-
-            delay = self.model.sampling_time["delay"]
-            duration = self.model.sampling_time["duration"]
-            transient = self.model.sampling_time["transition"]
-
-            if not batch_size:
-                batch_size = self.model.batch_size
-
-            step_time = 1e-6
-            end_time = delay + batch_size*duration + (batch_size - 1)*transient
-
-            session.run(simulations.Tran(tstep=step_time, tstop=end_time, uic=True))
-
-    def _get_vector(self, name):
-        data = get_session().get_data(name)
-        if data is None:
-            raise KeyError(f"ngspice vector '{name}' not found")
-        return data
+    def _read(self, names, suffix=""):
+        names = np.asarray(names)
+        values = np.empty(names.shape)
+        for idx, name in np.ndenumerate(names):
+            data = get_session().get_data(f"{name}{suffix}")
+            if data is None:
+                raise KeyError(f"ngspice vector '{name}{suffix}' not found")
+            values[idx] = data[0]
+        return values
     # >>>
 
-    # read voltages <<<
+    # read results <<<
     def read_simulation_voltages(self, net_names):
-        if self.model.simulation_kind == "tran":
-            return self.read_transient_simulation_voltages(net_names)
-        else:
-            return self.read_dc_simulation_voltages(net_names)
+        return self._read(net_names)
 
-    def read_dc_simulation_voltages(self, net_names):
-        voltages = np.zeros(len(net_names))
-        for i, net_name in enumerate(net_names):
-            voltages[i] = self._get_vector(net_name)[0]
-        return voltages
-
-    def read_transient_simulation_voltages(self, net_names, batch_size=None):
-        if not batch_size:
-            time_values = sample_times(**self.model.sampling_time, n_cycles=self.model.batch_size)
-        else:
-            time_values = sample_times(**self.model.sampling_time, n_cycles=batch_size)
-
-        # get the indices of the time values according to the sample times
-        time = self._get_vector("time")
-        idx_array = np.zeros_like(time_values, dtype=int)
-        for i, t in enumerate(time_values):
-            differences = np.abs(time - t[0])
-            index1 = np.argmin(differences)
-            differences = np.abs(time - t[1])
-            index2 = np.argmin(differences)
-            idx_array[i] = [index1, index2]
-
-        free_voltages = np.zeros(shape=(len(net_names), len(time_values)))
-        nudge_voltages = np.zeros(shape=(len(net_names), len(time_values)))
-
-        for i, net_name in enumerate(net_names):
-            node_voltages = self._get_vector(net_name)
-            for j in range(len(idx_array)):
-                begin, end = idx_array[j]
-                mid = begin + (end - begin) // 2
-                free_voltages[i][j] = np.mean(node_voltages[begin:mid])
-                nudge_voltages[i][j] = np.mean(node_voltages[mid+1:end])
-
-        return free_voltages, nudge_voltages
-
-    # >>>
-
-    # read currents <<<
     def read_simulation_currents(self, branch_names):
-        if self.model.simulation_kind == "tran":
-            raise NotImplementedError("Not Implemented Yet !")
-        else:
-            return self.read_dc_simulation_currents(branch_names)
+        return self._read(branch_names, "#branch")
 
-    def read_dc_simulation_currents(self, branch_names):
-        currents = np.zeros(len(branch_names))
-        for i, branch_name in enumerate(branch_names):
-            currents[i] = self._get_vector(f"{branch_name}#branch")[0]
-        return currents
-    # >>>
-
-    # get simulation data <<<
     def get_sim_data(self, phase):
-        if self.model.simulation_kind == "tran":
-            pass
-
-        else:
-            for layer in self.model.computation_graph:
-                if layer.save_sim_data:
-                    layer.store_phase_data(self, phase)
+        for layer in self.model.computation_graph:
+            if layer.save_sim_data:
+                layer.store_phase_data(self, phase)
     # >>>

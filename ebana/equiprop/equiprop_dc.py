@@ -26,17 +26,17 @@ class EqPropDC:
     # >>>
 
     # free phase <<<
-    def free_phase(self, X, Y, idx, mode="training"):
+    def free_phase(self, X, Y, idx, training=True):
         """
         This implements the free phase of the EqProp algorithm,
         where no current is injected into the output nodes.
         """
         # Only one sample is simulated at a time
         self.spice.build_circuit_free(X, idx=idx)
-        self.spice.simulate_circuit(circuit_update=None, mode=mode)
+        self.spice.simulate_circuit()
 
         # Get simulation data
-        if mode == "training":
+        if training:
             self.spice.get_sim_data(phase=self.default_free_phase_name)
 
         # Get prediction of the model
@@ -161,7 +161,7 @@ class EqPropDC:
             self.spice = Spice(self.model)
 
             # Run free phase for the current sample.
-            self.free_phase(X, Y, idx)
+            self.free_phase(X, Y, idx, training=False)
 
             # Get network prediction
             losses = {}
@@ -201,7 +201,7 @@ class EqPropDC:
             self.spice = Spice(self.model)
 
             # Run free phase for the current sample.
-            self.free_phase(X, Y, idx)
+            self.free_phase(X, Y, idx, training=False)
 
             for layer in self.model.outputs:
                 layer_output = layer.calculate_layer_output(self.network_prediction[layer.name])

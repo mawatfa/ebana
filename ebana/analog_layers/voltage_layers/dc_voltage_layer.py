@@ -1,7 +1,7 @@
 import numpy as np
 from ..one_terminal_devices import OneTerminal
 from ...netlist_generators import DCVoltageSources
-from ...utils.generating_functions import generate_names_from_shape
+from ...utils.generating_functions import numbered_names
 
 class DCVoltageLayer(OneTerminal):
     """
@@ -15,7 +15,7 @@ class DCVoltageLayer(OneTerminal):
     def _define_internal_branches(self):
         spice_letter = "v"
         prefix = f"{spice_letter}.x{self.name}.{spice_letter}"
-        self.branch_names = generate_names_from_shape(self.shape, prefix)
+        self.branch_names = numbered_names(self.shape, prefix)
 
     def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
         voltages = self.input_voltages if self.input_voltages is not None else spice_input_dict[self.name][sample_index]

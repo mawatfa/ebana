@@ -13,3 +13,8 @@ def generate_names_from_shape(shape: tuple, prefix: str = "P", use_underscore=Tr
     for idx in np.ndindex(shape):
         array[idx] = prefix + "".join(f"{uscore_prefix}{i + 1}" for i in idx)
     return array
+
+
+def numbered_names(shape: tuple, prefix: str):
+    """prefix1, prefix2, ... in `shape`, numbered like the netlist generators number the elements."""
+    return np.array([f"{prefix}{i + 1}" for i in range(int(np.prod(shape)))], dtype=object).reshape(shape)

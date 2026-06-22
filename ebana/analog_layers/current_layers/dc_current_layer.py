@@ -70,7 +70,7 @@ class DCCurrentLayer(OneTerminal):
     def store_phase_data(self, sim_obj, phase):
         if self.save_sim_data:
             self.voltages[phase] = {
-                "drop": sim_obj.read_dc_simulation_voltages(self.out_net_names)
+                "drop": sim_obj.read_simulation_voltages(self.out_net_names)
             }
 
     def get_batch_data_spec(self) -> dict:
