@@ -87,21 +87,12 @@ class Evaluator:
 
         self.dataset_size = len(dataset)
 
-        # prepare arguments for the processes
-        child_processes_args = []
-        for _, _ in self.model.output_nodes.items():
-            for process_num in range(self.model.n_processes_test):
-                child_processes_args.append(
-                    (X, Y, self.dataset_size, process_num, self.model.n_processes_test)
-                )
+        # one task per process; each handles every n-th sample
+        n = self.model.n_processes_test
+        child_processes_args = [(X, Y, self.dataset_size, process_num, n) for process_num in range(n)]
 
-        # run processes
-        pool = Pool(processes=self.model.n_processes_test)
-
-        if mode == "evaluating":
-            results = pool.starmap(EqProp(self.model).evaluate, child_processes_args)
-        else:
-            results = pool.starmap(EqProp(self.model).predict, child_processes_args)
-
-        return results
+        algorithm = EqProp(self.model)
+        task = algorithm.evaluate if mode == "evaluating" else algorithm.predict
+        with Pool(processes=n) as pool:
+            return pool.starmap(task, child_processes_args)
     # >>>

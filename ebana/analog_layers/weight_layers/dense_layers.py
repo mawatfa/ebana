@@ -143,15 +143,3 @@ class DenseLayer(TwoTerminals):
 
     def default_weight_update_func(self, update, step):
         self.w = self.constraint(self.w - self.lr(step) * update, self.w)
-
-
-class DenseLayerBehavioral:
-    pass
-
-
-class DenseLayerMemristor:
-    pass
-
-
-class DenseLayerMemristorConductance:
-    pass

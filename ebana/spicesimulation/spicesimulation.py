@@ -7,21 +7,22 @@ from pycircuitsim.simulator import NgSpiceSession, simulations
 # >>>
 
 # simulation parameters <<<
-SIMULATOR_PARAMS = {
-        "temperature": 27,
-        "nominal_temperature": 27
-        }
+SIMULATOR_PARAMS = {"temperature": 27, "nominal_temperature": 27}
 # >>>
 
 # one ngspice instance per process, reused across samples <<<
 _session = None
+
 
 def get_session():
     global _session
     if _session is None:
         _session = NgSpiceSession()
     return _session
+
+
 # >>>
+
 
 class Spice:
     def __init__(self, model):
@@ -30,7 +31,9 @@ class Spice:
     # build netlist <<<
     def build_circuit_free(self, dataset_input_dict, idx=0):
         self.circuit = Circuit("ebana_circuit")
-        self.circuit.raw(f".options TEMP={SIMULATOR_PARAMS['temperature']} TNOM={SIMULATOR_PARAMS['nominal_temperature']}")
+        self.circuit.raw(
+            f".options TEMP={SIMULATOR_PARAMS['temperature']} TNOM={SIMULATOR_PARAMS['nominal_temperature']}"
+        )
         for layer in self.model.computation_graph:
             layer.build_spice_subcircuit(self.circuit, dataset_input_dict, idx)
 
@@ -38,13 +41,16 @@ class Spice:
         self.circuit_update = []
         for layer in self.model.computation_graph:
             if isinstance(layer, Layers.CurrentNudgingLayer):
-                self.circuit_update.extend(layer.call_nudging(self.circuit, nudge_current[layer.name]))
+                self.circuit_update.extend(
+                    layer.call_nudging(self.circuit, nudge_current[layer.name])
+                )
 
     def write_netlist(self, filename, dataset_input_dict, idx=0):
         self.build_circuit_free(dataset_input_dict, idx)
         if filename:
             with open(filename, "w") as f:
                 f.write(str(self.circuit))
+
     # >>>
 
     # simulate circuit <<<
@@ -72,6 +78,7 @@ class Spice:
                 raise KeyError(f"ngspice vector '{name}{suffix}' not found")
             values[idx] = data[0]
         return values
+
     # >>>
 
     # read results <<<
@@ -85,4 +92,5 @@ class Spice:
         for layer in self.model.computation_graph:
             if layer.save_sim_data:
                 layer.store_phase_data(self, phase)
+
     # >>>

@@ -27,11 +27,6 @@ class Model:
         self.outputs = outputs                      # list of outputs of the network
         self.n_processes_train = n_processes_train  # number of parallel processes
         self.n_processes_test = n_processes_test    # number of parallel processes
-        self.set_stopping_condition_loss(func=None)
-        self.set_stopping_condition_accuracy(func=None)
-        self.adaptive_learning = None
-        self.stopping_condition_loss = None
-        self.stopping_condition_accuracy = None
         self._build_computation_graph(inputs)
         self.fit_method_called = False
     # >>>
@@ -58,20 +53,6 @@ class Model:
 
             visisted.append(current_layer)
             queue.pop(0)
-    # >>>
-
-    # adaptive learning methods <<<
-    def set_adaptive_learning(self, func):
-        self.adaptive_learning = True
-        self.adaptive_learning_func = func
-
-    def set_stopping_condition_loss(self, func):
-        self.stopping_condition_loss = True
-        self.stopping_condition_loss_func = func
-
-    def set_stopping_condition_accuracy(self, func):
-        self.stopping_condition_accuracy = True
-        self.stopping_condition_accuracy_func = func
     # >>>
 
     # write netlist <<<
@@ -119,8 +100,6 @@ class Model:
         self.loss_reporter = LossReporter(model=self, total_loss=self.accumulator.total_loss)
         self.training_validator = TrainingValidator(model=self, test_accuracy=self.accumulator.test_accuracy, metrics=self.metrics)
         self.history_loader = HistoryLoader(self.accumulator)
-
-        end_training = False
 
         for epoch_num in range(initial_epoch, self.epochs):
             self.epoch_num = epoch_num
@@ -170,27 +149,6 @@ class Model:
                 # Validate on test/validation dataset
                 if self.validation_data is not None:
                     self.training_validator.evaluate_validation(self.validation_data, epoch_num, batch_num)
-
-                    if self.stopping_condition_accuracy:
-                        stop_condition = self.stopping_condition_accuracy_func(batch_num, epoch_num, self.accumulator.test_accuracy)
-                        if stop_condition:
-                            end_training = True
-                            break
-
-                if self.stopping_condition_loss:
-                    stop_condition = self.stopping_condition_loss_func(batch_num, epoch_num, self.accumulator.total_loss)
-                    if stop_condition:
-                        end_training = True
-                        break
-
-                # I need to move this one indentation back so that it is only executed after the end of an epoch, not a batch
-                if self.adaptive_learning:
-                    self.adaptive_learning_func()
-
-            # self.save_history("history.pickle")
-
-            if end_training:
-                break
     # >>>
 
     # evaluate method <<<

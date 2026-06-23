@@ -1,7 +1,7 @@
 import numpy as np
 from abc import abstractmethod
 from .base import BaseLoss
-from .utils import calculate_prediction, verify_result_using_probability
+from .utils import verify_result_using_probability
 
 class MSEBase(BaseLoss):
     def __init__(self, beta):
