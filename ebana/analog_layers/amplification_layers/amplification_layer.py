@@ -1,7 +1,6 @@
 import numpy as np
 from ..two_terminal_devices import TwoTerminals
-from ...netlist_generators import BidirectionalAmplifier
-from ...utils.generating_functions import numbered_names
+from ...simulation import GROUND
 from ...schedules import as_schedule
 
 
@@ -16,22 +15,18 @@ class AmplificationLayer(TwoTerminals):
         self.output_shape = self.input_shape
         self.shape = self.input_shape
 
-    def _define_internal_branches(self):
-        spice_letter = "b"
-        prefix = f"{spice_letter}.x{self.name}.{spice_letter}"
-        self.branch_names = numbered_names(self.shape, prefix)
-
     def _build(self) -> None:
         self.w = np.zeros(self.shape) + self.param["gain"]
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
-        subcircuit = BidirectionalAmplifier(
-            self.name,
-            self.in_subcircuit_net_names.flatten(),
-            self.out_subcircuit_net_names.flatten(),
-            self.param,
-        )
-        circuit.X(self.name, (*self.in_net_names.flatten(), *self.out_net_names.flatten()), subcircuit=subcircuit)
+    def stamp(self, block, inputs, sample_index):
+        shift, gain = self.param["shift"], self.param["gain"]
+        outputs = []
+        for i, (inn, out) in enumerate(zip(np.ravel(self.in_net_names), np.ravel(self.out_net_names)), start=1):
+            # drive the output, and draw the matching current from the input so the stage is bidirectional
+            amp = block.behavioral_voltage(i, out, GROUND, f"{{{shift} + {gain} * (V({inn}) - {shift})}}")
+            block.behavioral_current(f"i{i}", inn, GROUND, f"{{{-1/gain} * I({amp.name})}}")
+            outputs.append(amp)
+        self.amplifiers = block.array(outputs, self.shape)
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)
@@ -57,10 +52,10 @@ class AmplificationLayer(TwoTerminals):
     def store_phase_data(self, sim_obj, phase):
         if self.save_sim_data:
             self.voltages[phase] = {
-                "input": sim_obj.read_simulation_voltages(self.in_net_names),
+                "input": sim_obj.voltages(self.in_net_names),
             }
             self.currents[phase] = {
-                "drop": sim_obj.read_simulation_currents(self.branch_names)
+                "drop": sim_obj.currents(self.amplifiers)
             }
 
     def get_batch_data_spec(self) -> dict:

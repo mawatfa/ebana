@@ -7,7 +7,7 @@ Pool = multiprocessing.get_context("fork").Pool
 
 from ..dataset_handler import Dataset, DataLoader
 from ..equiprop import EqProp
-from ..spicesimulation import Spice
+from ..simulation import Netlist
 from ..data_collection.data_accumulator import DataAccumulator
 from ..stat_reporting.accuracy import AccuracyReporter
 from ..stat_reporting.loss import LossReporter
@@ -56,8 +56,15 @@ class Model:
     # >>>
 
     # write netlist <<<
+    def build_netlist(self, inputs, sample_index=0):
+        netlist = Netlist()
+        for layer in self.computation_graph:
+            layer.stamp(netlist.block(layer.name), inputs, sample_index)
+        return netlist
+
     def write_netlist(self, dataset, filename, sample=0):
-        Spice(self).write_netlist(filename, dataset.inputs, sample)
+        with open(filename, "w") as f:
+            f.write(str(self.build_netlist(dataset.inputs, sample)))
     # >>>
 
     # history saver/loader <<<

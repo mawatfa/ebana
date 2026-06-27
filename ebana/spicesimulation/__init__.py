@@ -1,1 +1,0 @@
-from .spicesimulation import Spice

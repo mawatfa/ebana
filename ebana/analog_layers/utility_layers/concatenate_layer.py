@@ -50,5 +50,5 @@ class ConcatenateLayer(BaseLayer):
         all_net_names = [np.array(p.out_net_names, dtype=object) for p in self.parent]
         self.out_net_names = np.concatenate(all_net_names, axis=self.axis)
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
+    def stamp(self, block, inputs, sample_index):
         pass

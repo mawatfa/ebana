@@ -170,8 +170,6 @@ class LocallyConnected2DLayer(TwoTerminals):
                 patch_layer.shape = (len(patch_in_nets), self.filters)
 
                 # internal and external nets
-                patch_layer.in_subcircuit_net_names = generate_names_from_shape(patch_layer.input_shape, "IN")
-                patch_layer.out_subcircuit_net_names = generate_names_from_shape(patch_layer.output_shape, "OUT")
                 patch_layer.in_net_names = patch_in_nets
                 patch_layer.out_net_names = patch_out_nets
 
@@ -201,12 +199,10 @@ class LocallyConnected2DLayer(TwoTerminals):
             patch_layer._build()
         self._gather_weights()
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index: int) -> None:
-        """
-        Build each patch's subcircuit in the overall circuit.
-        """
+    def stamp(self, block, inputs, sample_index):
+        # every patch is a small crossbar with its own block
         for patch_layer in self.local_dense_layers:
-            patch_layer.build_spice_subcircuit(circuit, spice_input_dict, sample_index)
+            patch_layer.stamp(block.netlist.block(patch_layer.name), inputs, sample_index)
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)

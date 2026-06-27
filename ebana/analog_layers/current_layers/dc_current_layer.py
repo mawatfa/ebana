@@ -1,6 +1,6 @@
 import numpy as np
 from ..one_terminal_devices import OneTerminal
-from ...netlist_generators import DCCurrentSources
+from ...simulation import GROUND
 from ...schedules import as_schedule
 
 
@@ -39,18 +39,19 @@ class DCCurrentLayer(OneTerminal):
         if self.initialize_currents:
             self.w = np.zeros(shape=self.shape)
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
-
-        # if self.name in ["cd1r", "cd1c"]:
-        #     self.w = spice_input_dict[self.name][sample_index]
+    def stamp(self, block, inputs, sample_index):
 
         self.w = (
             self.w
             if self.initialize_currents
-            else spice_input_dict[self.name][sample_index]
+            else inputs[self.name][sample_index]
         )
 
-        circuit.X(self.name, tuple(self.out_net_names), subcircuit=DCCurrentSources(self.name, self.out_subcircuit_net_names, self.w))
+        nets = np.ravel(self.out_net_names)
+        self.sources = block.array(
+            [block.current_source(i + 1, net, GROUND, c) for i, (net, c) in enumerate(zip(nets, np.ravel(self.w)))],
+            self.shape,
+        )
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)
@@ -70,7 +71,7 @@ class DCCurrentLayer(OneTerminal):
     def store_phase_data(self, sim_obj, phase):
         if self.save_sim_data:
             self.voltages[phase] = {
-                "drop": sim_obj.read_simulation_voltages(self.out_net_names)
+                "drop": sim_obj.voltages(self.out_net_names)
             }
 
     def get_batch_data_spec(self) -> dict:

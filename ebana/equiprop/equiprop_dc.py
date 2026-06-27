@@ -1,6 +1,6 @@
 # imports <<<
 import numpy as np
-from ..spicesimulation import Spice
+from ..simulation import Simulator
 from ..data_collection.process_data_accumulator import ProcessDataAccumulator
 # >>>
 
@@ -9,6 +9,7 @@ class EqPropDC:
     # constructor <<<
     def __init__(self, model):
         self.model = model
+        self.sim = Simulator()
         self.default_free_phase_name = "free"
         self.default_nudge_phase_name = "nudge"
     # >>>
@@ -32,17 +33,17 @@ class EqPropDC:
         where no current is injected into the output nodes.
         """
         # Only one sample is simulated at a time
-        self.spice.build_circuit_free(X, idx=idx)
-        self.spice.simulate_circuit()
+        self.sim.load(self.model.build_netlist(X, idx))
+        self.sim.solve()
 
         # Get simulation data
         if training:
-            self.spice.get_sim_data(phase=self.default_free_phase_name)
+            self.store_phase_data(self.default_free_phase_name)
 
         # Get prediction of the model
         self.network_prediction = {}
         for layer in self.model.outputs:
-            self.network_prediction[layer.name] = layer.get_layer_spice_output(self.spice)
+            self.network_prediction[layer.name] = layer.get_layer_spice_output(self.sim)
     # >>>
 
     # nudging phase <<<
@@ -51,13 +52,19 @@ class EqPropDC:
         This implements the nudging phase of the EqProp algorithm,
         where loss gradient current is injected into the output nodes.
         """
-        # In the nudging phase, we inject a current into each output node,
-        # and simulate the circuit again.
-        self.spice.build_circuit_nudge(injected_current)
-        self.spice.simulate_circuit(circuit_update=self.spice.circuit_update)
+        # In the nudging phase, we inject a current into each output node
+        # of the already-loaded circuit, and simulate it again.
+        for layer in self.model.outputs:
+            self.sim.alter(*layer.nudge(injected_current[layer.name]))
+        self.sim.solve()
 
         # Get the simulation data again
-        self.spice.get_sim_data(phase=phase)
+        self.store_phase_data(phase)
+
+    def store_phase_data(self, phase):
+        for layer in self.model.computation_graph:
+            if layer.save_sim_data:
+                layer.store_phase_data(self.sim, phase)
     # >>>
 
     # train <<<
@@ -90,9 +97,6 @@ class EqPropDC:
         #######################################################################
         # each process handles ~ (batch_size / N_PROCESSES) samples
         for idx in range(process_num, batch_size, N_PROCESSES):
-            # Create spice object.
-            self.spice = Spice(self.model)
-
             # Run free phase for the current sample.
             self.free_phase(X, Y, idx)
 
@@ -157,9 +161,6 @@ class EqPropDC:
 
         # each process handles ~ (batch_size / N_PROCESSES) samples
         for idx in range(process_num, batch_size, N_PROCESSES):
-            # Create spice object.
-            self.spice = Spice(self.model)
-
             # Run free phase for the current sample.
             self.free_phase(X, Y, idx, training=False)
 
@@ -196,9 +197,6 @@ class EqPropDC:
 
         # each process handles ~ (batch_size / N_PROCESSES) samples
         for idx in range(process_num, batch_size, N_PROCESSES):
-
-            # Create spice object.
-            self.spice = Spice(self.model)
 
             # Run free phase for the current sample.
             self.free_phase(X, Y, idx, training=False)

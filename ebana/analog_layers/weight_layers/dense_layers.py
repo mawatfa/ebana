@@ -1,7 +1,5 @@
 import numpy as np
 from ..two_terminal_devices import TwoTerminals
-from ...netlist_generators.weight_layers import DenseResistorMatrix, DenseResistorMatrixMeasuringCurrent
-from ...utils.generating_functions import generate_names_from_shape
 from ...schedules import LearningRateSchedule, as_schedule
 from ...constraints import MaxRelativeChange, as_constraint
 
@@ -35,37 +33,35 @@ class DenseLayer(TwoTerminals):
 
         self.lr = as_schedule(lr)
 
-        if not self.save_currents:
-            self.netlist_generator = DenseResistorMatrix
-        else:
-            self.netlist_generator = DenseResistorMatrixMeasuringCurrent
-
     def _define_shapes(self) -> None:
         self.input_shape = self.parent.output_shape # type: ignore
         self.output_shape = (self.units,)
         self.shape = (self.input_shape[0], self.output_shape[0]) # type: ignore
-
-    def _define_internal_branches(self):
-        spice_letter = "v"
-        prefix = f"{spice_letter}.x{self.name}.{spice_letter}"
-        self.row_branch_names = generate_names_from_shape(self.input_shape, prefix + "r", use_underscore=False)
-        self.col_branch_names = generate_names_from_shape(self.output_shape, prefix + "c", use_underscore=False)
-
 
     def _build(self):
         if self.initializer is None:
             raise ValueError(f"layer '{self.name}' needs an initializer")
         self.w = self.initializer(self.shape)
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
-
-        subcircuit = self.netlist_generator(
-            self.name,
-            self.in_subcircuit_net_names,
-            self.out_subcircuit_net_names,
-            np.round(1 / self.w, 4),
-        )
-        circuit.X(self.name, (*self.in_net_names, *self.out_net_names), subcircuit=subcircuit)
+    def stamp(self, block, inputs, sample_index):
+        R = np.round(1 / self.w, 4)
+        rows, cols = list(self.in_net_names), list(self.out_net_names)
+        if self.save_currents:
+            # zero-volt sources at both ends of each line measure its current
+            row_nodes = [block.node(f"row_{j + 1}") for j in range(len(rows))]
+            col_nodes = [block.node(f"col_{i + 1}") for i in range(len(cols))]
+            self.row_sources = block.array(
+                [block.voltage_source(f"r{j + 1}", net, node, 0) for j, (net, node) in enumerate(zip(rows, row_nodes))],
+                self.input_shape,
+            )
+            self.col_sources = block.array(
+                [block.voltage_source(f"c{i + 1}", node, net, 0) for i, (net, node) in enumerate(zip(cols, col_nodes))],
+                self.output_shape,
+            )
+            rows, cols = row_nodes, col_nodes
+        for i in range(len(cols)):
+            for j in range(len(rows)):
+                block.resistor(f"{j + 1}_{i + 1}", rows[j], cols[i], R[j][i])
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)
@@ -99,9 +95,9 @@ class DenseLayer(TwoTerminals):
     def store_phase_data(self, sim_obj, phase):
         if self.save_sim_data:
 
-            input_node_voltages = sim_obj.read_simulation_voltages(self.in_net_names)
+            input_node_voltages = sim_obj.voltages(self.in_net_names)
             input_node_voltages_reshaped = input_node_voltages.reshape(len(self.in_net_names), 1)
-            output_node_voltages = sim_obj.read_simulation_voltages(self.out_net_names)
+            output_node_voltages = sim_obj.voltages(self.out_net_names)
 
             self.voltages[phase] = {
                 "input": input_node_voltages,
@@ -111,8 +107,8 @@ class DenseLayer(TwoTerminals):
 
             if self.save_currents:
                 self.currents[phase] = {
-                    "r": sim_obj.read_simulation_currents(self.row_branch_names),
-                    "c": sim_obj.read_simulation_currents(self.col_branch_names)
+                    "r": sim_obj.currents(self.row_sources),
+                    "c": sim_obj.currents(self.col_sources)
                 }
 
 

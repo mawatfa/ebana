@@ -1,7 +1,6 @@
 import numpy as np
 from ..one_terminal_devices import OneTerminal
-from ...netlist_generators import DiodeBehavioral, DiodeReal
-from ...utils.generating_functions import numbered_names
+from ...simulation import GROUND
 from ...schedules import as_schedule
 
 
@@ -28,29 +27,28 @@ class DiodeLayer(OneTerminal):
         super()._define_external_nets()
         self.out_net_names = self.parent.out_net_names
 
-    def _define_internal_branches(self):
-        spice_letter = "v"
-        prefix = f"{spice_letter}.x{self.name}.{spice_letter}"
-        self.branch_names = numbered_names(self.shape, prefix)
-
     def _build(self):
         self.w = np.zeros(shape=self.shape) + self.bias_voltage
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
-        args = [
-            self.name,
-            self.out_subcircuit_net_names.flatten(),
-            self.direction,
-            self.w.flatten(),
-            self.param,
-        ]
-        if self.kind == "behavioral":
-            subcircuit = DiodeBehavioral(*args)
-        elif self.kind == "real":
-            subcircuit = DiodeReal(*args)
-            circuit.include(self.param['path'])
-
-        circuit.X(self.name, tuple(self.out_net_names.flatten()), subcircuit=subcircuit)
+    def stamp(self, block, inputs, sample_index):
+        if self.kind == "real":
+            block.include(self.param["path"])
+        sources = []
+        for i, (out, bias) in enumerate(zip(np.ravel(self.out_net_names), np.ravel(self.w)), start=1):
+            node = block.node(f"n{i}")
+            # the diode conducts from `out` to its bias node ("down") or the other way ("up")
+            anode, cathode = (out, node) if self.direction == "down" else (node, out)
+            if self.kind == "behavioral":
+                VTH, RON, ROFF = self.param["VTH"], self.param["RON"], self.param["ROFF"]
+                if self.direction == "down":
+                    x = f"(V({out}) - V({node}) - {VTH})"
+                else:
+                    x = f"-(V({out}) + V({node}) + {VTH})"
+                block.behavioral_current(f"d{i}", anode, cathode, f"{{ max(({x}/{ROFF}), ({x}/{RON})) }}")
+            else:
+                block.diode(i + 1, anode, cathode, model=self.param["model_name"])
+            sources.append(block.voltage_source(i, node, GROUND, bias))
+        self.bias_sources = block.array(sources, self.shape)
 
     # -------------------------------------------------
     # Saving methods (only matter if save_sim_data=True)
@@ -70,7 +68,7 @@ class DiodeLayer(OneTerminal):
     def store_phase_data(self, sim_obj, phase):
         if self.save_sim_data:
             self.currents[phase] = {
-                "drop": sim_obj.read_simulation_currents(self.branch_names)
+                "drop": sim_obj.currents(self.bias_sources)
             }
 
     def get_batch_data_spec(self) -> dict:

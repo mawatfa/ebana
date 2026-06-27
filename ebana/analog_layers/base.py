@@ -41,16 +41,9 @@ class BaseLayer(ABC):
         self.output_shape = None
         self.shape = None
 
-        # Net names for internal and external connections
-        ## External connections
+        # Net names the layer connects to
         self.in_net_names: List[str] = []
         self.out_net_names: List[str] = []
-        ## Internal connections
-        self.in_subcircuit_net_names: List[str] = []
-        self.out_subcircuit_net_names: List[str] = []
-
-        # Branch names for measuring currents
-        self.branch_names: List[str] = []
 
         # Storage for simulated data across phases
         self.voltages = {}
@@ -68,13 +61,12 @@ class BaseLayer(ABC):
 
     def build(self, inputs: Optional[BaseLayer | List[BaseLayer]] = None) -> None:
         """
-        Connects parent(s) and defines internal shapes, nets, branches, and other variables.
+        Connects parent(s) and defines shapes, nets, and other variables.
         """
         self._connect_parents(inputs)
         self._define_shapes()
         self._define_internal_nets()
         self._define_external_nets()
-        self._define_internal_branches()
         self._build()
 
     def _connect_parents(self, inputs: Optional[BaseLayer | List[BaseLayer]]) -> None:
@@ -116,13 +108,6 @@ class BaseLayer(ABC):
         """
         pass
 
-    def _define_internal_branches(self) -> None:
-        """
-        Generates internal branch names for measuring currents.
-        Override in child classes if needed.
-        """
-        pass
-
     def _build(self) -> None:
         """
         Additional initialization can be performed here.
@@ -131,11 +116,8 @@ class BaseLayer(ABC):
         pass
 
     @abstractmethod
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index: int) -> None:
-        """
-        Defines how the subcircuit of the layer is built in a SPICE-like environment.
-        Must be implemented by child classes.
-        """
+    def stamp(self, block, inputs, sample_index: int) -> None:
+        """Adds the layer's elements to the netlist through `block` and keeps their handles."""
         pass
 
     # -------------------------------------------------

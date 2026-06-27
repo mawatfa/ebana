@@ -59,7 +59,7 @@ class StackLayer(BaseLayer):
         # Use numpy to stack net names
         self.out_net_names = np.stack([np.array(p.out_net_names) for p in self.parent], axis=self.axis)
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
+    def stamp(self, block, inputs, sample_index):
         """
         No SPICE subcircuit is needed here, since we only pass net names forward.
         """

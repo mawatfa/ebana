@@ -25,5 +25,5 @@ class JoinNetNamesLayer(BaseLayer):
         self.in_net_names = self.parent[0].in_net_names
         self.out_net_names = reference_out_net_names
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
+    def stamp(self, block, inputs, sample_index):
         pass

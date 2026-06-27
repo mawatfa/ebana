@@ -1,6 +1,6 @@
 import numpy as np
 from ..one_terminal_devices import OneTerminal
-from ...netlist_generators import DCCurrentSources
+from ...simulation import GROUND
 from ...activations import set_layer_activation
 
 class CurrentNudgingLayer(OneTerminal):
@@ -20,18 +20,18 @@ class CurrentNudgingLayer(OneTerminal):
         self.output_shape = self.parent.output_shape
         self.shape = (self.output_shape[0],)
 
-    def _define_internal_nets(self):
-        self.out_subcircuit_net_names = self.parent.out_subcircuit_net_names
-
     def _define_external_nets(self):
         self.out_net_names = self.parent.out_net_names
 
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index):
-        current = np.zeros(shape=self.shape)
-        circuit.X(self.name, tuple(self.out_net_names), subcircuit=DCCurrentSources(self.name, self.out_subcircuit_net_names, -current))
+    def stamp(self, block, inputs, sample_index):
+        # zero current in the free phase; the nudge sets it with alter
+        self.sources = block.array(
+            [block.current_source(i + 1, net, GROUND, -0.0) for i, net in enumerate(np.ravel(self.out_net_names))],
+            self.shape,
+        )
 
     def get_layer_spice_output(self, sim_obj):
-        return sim_obj.read_simulation_voltages(self.out_net_names)
+        return sim_obj.voltages(self.out_net_names)
 
     def calculate_layer_output(self, output_node_voltages):
         """
@@ -47,14 +47,10 @@ class CurrentNudgingLayer(OneTerminal):
     def calculate_layer_prediction(self, prediction):
         return self.activation(prediction)
 
-    def call_nudging(self, circuit, I):
-        alter_commands = []
+    def nudge(self, I):
+        """The sources to change and their values for injecting currents `I`."""
+        I = np.asarray(I, dtype=float)
         if self.fold:
-            for idx in range(len(I)):
-                alter_commands.append(f"alter I.X{self.name}.I{2*idx+1}={-I[idx]}")
-                alter_commands.append(f"alter I.X{self.name}.I{2*idx+2}={I[idx]}")
-        else:
-            for idx in range(len(I)):
-                alter_commands.append(f"alter I.X{self.name}.I{idx+1}={-I[idx]}")
-
-        return alter_commands
+            # each output is a pair of nodes: push one down and the other up
+            return self.sources, np.stack([-I, I], axis=1).ravel()
+        return self.sources, -I

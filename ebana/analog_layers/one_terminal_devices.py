@@ -23,14 +23,8 @@ class OneTerminal(BaseLayer):
             self.units = (np.prod(self.input_shape),)
 
     def _define_internal_nets(self) -> None:
-        self.out_subcircuit_net_names = generate_names_from_shape(self.shape, "P")
+        pass
 
     def _define_external_nets(self) -> None:
         prefix = f"n_{self.name}"
         self.out_net_names = generate_names_from_shape(self.shape, prefix)
-
-    def build_spice_subcircuit(self, circuit, spice_input_dict, sample_index: int) -> None:
-        """
-        Implementation for building a one-terminal device subcircuit.
-        """
-        pass
