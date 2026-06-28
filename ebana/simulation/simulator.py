@@ -1,8 +1,9 @@
 import numpy as np
-from pycircuitsim.simulator import NgSpiceSession, simulations
+from pycircuitsim.simulator import NgSpiceSession, VerilogaModel, simulations
 
 # one ngspice per process
 _session = None
+_loaded_veriloga = set()
 
 
 class Simulator:
@@ -16,6 +17,11 @@ class Simulator:
         return _session
 
     def load(self, netlist):
+        for path in sorted(netlist.veriloga_files - _loaded_veriloga):
+            model = VerilogaModel(module_name="", path=path)
+            model.compile_model()
+            self.session.send_command(f"osdi {model}")
+            _loaded_veriloga.add(path)
         # free the previous circuit, otherwise memory grows
         self.session.reset()
         self.session.load_netlist(netlist.lines())

@@ -4,14 +4,17 @@ class ProcessDataAccumulator:
     def __init__(self, model, batch_size):
         self.model = model
         self.collector = DataCollector(batch_size)
-        for layer in self.model.computation_graph:
-            self.collector.add_layer_specs(layer, phase_specs=True, batch_specs=False)
+        self.enabled = self.model.metrics.save_phase_data
+        for layer in self.model.layers:
+            self.collector.add_layer_specs(layer, phase_specs=self.enabled, batch_specs=False)
 
-    def save_metrics_during_training(self, idx, phase):
-        for layer in self.model.computation_graph:
+    def save_metrics_during_training(self, idx, phase, sim):
+        if not self.enabled:
+            return
+        for layer in self.model.layers:
             if layer.save_sim_data:
-                for phase_group, phase_data_spec in layer.get_phase_data_spec().items():
-                    for data_key in phase_data_spec.keys():
+                for phase_group, values in layer.record(sim).items():
+                    for data_key, data in values.items():
                         self.collector.store_phase_data(
                             layer_name=layer.name,
                             phase_group=phase_group,
@@ -19,7 +22,7 @@ class ProcessDataAccumulator:
                             epoch=None,
                             batch=idx,
                             phase=phase,
-                            data=layer.get_phase_data()[phase_group][phase][data_key]
+                            data=data,
                         )
 
     def get_data(self):

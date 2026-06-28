@@ -39,7 +39,7 @@ class DataAccumulator:
 
     def __initialize_data_collection(self):
         self.collector = DataCollector(self.batch_size, self.num_batches, self.num_epochs)
-        for layer in self.model.computation_graph:
+        for layer in self.model.layers:
             save_phase_data = self.model.metrics.save_phase_data
             save_batch_data = self.model.metrics.save_batch_data
             self.collector.add_layer_specs(layer, save_phase_data, save_batch_data)
@@ -73,7 +73,7 @@ class DataAccumulator:
     def save_variables_not_needing_aggregation(self, results, epoch_num, batch_num):
         for process_num in range(self.n_processes_train):
 
-            for layer in self.model.computation_graph:
+            for layer in self.model.layers:
 
                 # Save per phase data
                 if layer.save_sim_data:
@@ -91,10 +91,11 @@ class DataAccumulator:
 
 
         # Save per batch data
-        for layer in self.model.computation_graph:
+        for layer in self.model.layers:
             if self.model.metrics.save_batch_data:
-                for key in layer.get_batch_data_spec().keys():
-                    self.collector.store_batch_data(layer.name, key, epoch_num, batch_num, layer.get_batch_data()[key])
+                if layer.save_sim_data:
+                    for key, p in layer.params.items():
+                        self.collector.store_batch_data(layer.name, key, epoch_num, batch_num, p.value)
 
 
     def _save_variables_needing_aggregation(self, results, epoch_num, batch_num):
@@ -102,12 +103,11 @@ class DataAccumulator:
 
         for process_num in range(self.n_processes_train):
 
-            # (a). Voltage Drops: We need to add the voltage drops of all samples in a batch.
-            for layer in self.model.computation_graph:
-                if layer.trainable:
-                    if process_num == 0:
-                        layer.accumulated_gradient = np.zeros(shape=layer.shape)
-                    layer.accumulated_gradient += results[process_num]["process_layer_accumulated_gradient"][layer.name]
+            # (a). Gradients: sum over all samples of the batch.
+            for p in self.model.trainable_parameters():
+                if process_num == 0:
+                    p.grad = np.zeros(p.shape)
+                p.grad += results[process_num]["process_parameter_gradients"][p.full_name]
 
             # (b). Losses
             for k, v in self.output_nodes.items():

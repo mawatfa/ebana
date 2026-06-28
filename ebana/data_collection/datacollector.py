@@ -24,24 +24,19 @@ class DataCollector:
 
         # Phase data spec
         if phase_specs:
-            phase_specs = layer.get_phase_data_spec()
-            for phase_group, phase_data_spec in phase_specs.items():
+            for phase_group, phase_data_spec in layer.record_spec().items():
                 for data_key, shape in phase_data_spec.items():
                     self._reserve_phase_data(layer.name, phase_group, data_key, shape)
 
         if batch_specs:
-            # Batch data spec
-            batch_specs = layer.get_batch_data_spec()
-            for data_key, shape in batch_specs.items():
-                self._reserve_batch_data(layer.name, data_key, shape)
+            # Batch data: the parameter values after each batch
+            for data_key, p in layer.params.items():
+                self._reserve_batch_data(layer.name, data_key, p.shape)
 
     def _reserve_phase_data(self, layer_name, phase_group, data_key, shape):
         """
         Create storage for data that is saved each phase.
         """
-        # print(layer_name, phase_group, data_key, shape)
-        # exit()
-
         if phase_group not in self.collected_data[layer_name]:
             self.collected_data[layer_name][phase_group] = {}
         if self.training_mode:

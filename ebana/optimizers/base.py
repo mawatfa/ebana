@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-CHECKPOINT_VERSION = 1
+CHECKPOINT_VERSION = 2
 
 
 class BaseOptimizer(ABC):
@@ -19,22 +19,19 @@ class BaseOptimizer(ABC):
         self.beta = beta
         self.iterations = 0
         self.state = {
-            layer.name: {slot: np.zeros(layer.shape) for slot in self.slots}
-            for layer in self._trainable_layers()
+            p.full_name: {slot: np.zeros(p.shape) for slot in self.slots}
+            for p in self.model.trainable_parameters()
         }
 
-    def _trainable_layers(self):
-        return [layer for layer in self.model.computation_graph if layer.trainable]
-
     @abstractmethod
-    def compute_update(self, grad, state) -> np.ndarray:
-        """The update of one layer. state holds its slots and can be changed in place."""
+    def compute_update(self, grad, state):
+        """The update of one parameter. state holds its slots and can be changed in place."""
 
     def step(self):
-        for layer in self._trainable_layers():
-            grad = layer.accumulated_gradient / (self.model.batch_size * self.beta)
-            update = self.compute_update(grad, self.state[layer.name])
-            layer.weight_update_func(update, self.iterations)
+        for p in self.model.trainable_parameters():
+            grad = p.grad / (self.model.batch_size * self.beta)
+            update = self.compute_update(grad, self.state[p.full_name])
+            p.apply_update(update, self.iterations)
         self.iterations += 1
 
     # checkpointing <<<
@@ -44,9 +41,7 @@ class BaseOptimizer(ABC):
             "optimizer": type(self).__name__,
             "iterations": self.iterations,
             "state": self.state,
-            "variables": {
-                layer.name: layer.get_variables() for layer in self.model.computation_graph
-            },
+            "parameters": {p.full_name: p.value for p in self.model.parameters()},
         }
         with open(filepath, "wb") as handle:
             pickle.dump(checkpoint, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -60,21 +55,13 @@ class BaseOptimizer(ABC):
         if checkpoint["optimizer"] != type(self).__name__:
             raise ValueError(f"{filepath} was saved by {checkpoint['optimizer']}, not {type(self).__name__}")
 
-        names = {layer.name for layer in self.model.computation_graph}
-        if set(checkpoint["variables"]) != names:
-            raise ValueError(
-                f"{filepath}: layers {sorted(checkpoint['variables'])} do not match the model's {sorted(names)}"
-            )
-        for layer_name, slots in self.state.items():
-            saved = checkpoint["state"].get(layer_name, {})
-            for slot, array in slots.items():
-                if slot not in saved or saved[slot].shape != array.shape:
-                    raise ValueError(
-                        f"{filepath}: missing or mis-shaped optimizer slot '{slot}' for layer '{layer_name}'"
-                    )
+        params = {p.full_name: p for p in self.model.parameters()}
+        saved_values = checkpoint["parameters"]
+        if set(saved_values) != set(params):
+            raise ValueError(f"{filepath} has the parameters {sorted(saved_values)}, not {sorted(params)}")
 
-        for layer in self.model.computation_graph:
-            layer.set_variables(checkpoint["variables"][layer.name])
+        for name, p in params.items():
+            p.value = np.array(saved_values[name], dtype=float)
         self.state = checkpoint["state"]
         self.iterations = checkpoint["iterations"]
 

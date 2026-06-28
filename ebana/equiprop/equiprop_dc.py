@@ -19,11 +19,10 @@ class EqPropDC:
         self.nudging_phase(X, Y, idx, injected_current, self.default_nudge_phase_name)
 
     def default_ep_gradient_calculation(self):
-        for layer in self.model.computation_graph:
-            if layer.trainable:
-                free = layer.get_training_data(self.default_free_phase_name)
-                nudge = layer.get_training_data(self.default_nudge_phase_name)
-                layer.accumulated_gradient += layer.grad_func(free, nudge)
+        free = self.measurements[self.default_free_phase_name]
+        nudge = self.measurements[self.default_nudge_phase_name]
+        for p in self.model.trainable_parameters():
+            p.grad += p.gradient(free[p.full_name], nudge[p.full_name])
     # >>>
 
     # free phase <<<
@@ -62,9 +61,8 @@ class EqPropDC:
         self.store_phase_data(phase)
 
     def store_phase_data(self, phase):
-        for layer in self.model.computation_graph:
-            if layer.save_sim_data:
-                layer.store_phase_data(self.sim, phase)
+        """Measure every trainable parameter after this phase's solve."""
+        self.measurements[phase] = {p.full_name: p.measure(self.sim) for p in self.model.trainable_parameters()}
     # >>>
 
     # train <<<
@@ -72,11 +70,10 @@ class EqPropDC:
         """
         Training loop according to the equilibirum propagation algorithm.
         """
-        # We initialize the accumulated_gradient to zero so that we can
-        # accumulate the gradient across different samples.
-        for layer in self.model.computation_graph:
-            if layer.trainable:
-                layer.accumulated_gradient = np.zeros(layer.shape)
+        # Gradients accumulate over this process's samples.
+        for p in self.model.trainable_parameters():
+            p.grad = np.zeros(p.shape)
+        self.measurements = {}
 
         # Initialize metrics variables in case they should be saved
         self.data_accumulator = ProcessDataAccumulator(self.model, batch_size)
@@ -101,7 +98,7 @@ class EqPropDC:
             self.free_phase(X, Y, idx)
 
             # Save the metrics after the free phase.
-            self.data_accumulator.save_metrics_during_training(idx, phase=self.default_free_phase_name)
+            self.data_accumulator.save_metrics_during_training(idx, self.default_free_phase_name, self.sim)
 
             # Calculate the loss during the free phase and the current that must be injected during the nudging phase.
             injected_current, losses = {}, {}
@@ -122,7 +119,7 @@ class EqPropDC:
             self.default_ep_nudging_phases(X, Y, idx, injected_current)
 
             # Save the metrics after the free phase.
-            self.data_accumulator.save_metrics_during_training(idx, phase=self.default_nudge_phase_name)
+            self.data_accumulator.save_metrics_during_training(idx, self.default_nudge_phase_name, self.sim)
 
             # Calculate the update according to the EP algorithm
             self.default_ep_gradient_calculation()
@@ -131,16 +128,9 @@ class EqPropDC:
         #                            Algorithm End                            #
         #######################################################################
         # At the end of the batch, retrieve all the necessary variables.
-        process_layer_accumulated_gradient = {}
-
-        # Layer parameters
-        for layer in self.model.computation_graph:
-            if layer.trainable:
-                process_layer_accumulated_gradient[layer.name] = layer.accumulated_gradient
-
         return {
             "process_layer_collected_data": self.data_accumulator.get_data(),
-            "process_layer_accumulated_gradient": process_layer_accumulated_gradient,
+            "process_parameter_gradients": {p.full_name: p.grad for p in self.model.trainable_parameters()},
             "process_injected_currents": injected_currents,
             "process_losses": batch_loss,
         }

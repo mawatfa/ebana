@@ -1,64 +1,73 @@
+"""The model: a circuit made of connected layers, and its training loop."""
+
 # imports <<<
-import numpy as np
 import multiprocessing
 
 # the workers inherit the model by forking
 Pool = multiprocessing.get_context("fork").Pool
 
-from ..dataset_handler import Dataset, DataLoader
-from ..equiprop import EqProp
-from ..simulation import Netlist
-from ..data_collection.data_accumulator import DataAccumulator
-from ..stat_reporting.accuracy import AccuracyReporter
-from ..stat_reporting.loss import LossReporter
-from ..stat_reporting.validation import TrainingValidator
-from ..data_storage.save_load_history import HistoryLoader
+from .dataset_handler import Dataset, DataLoader
+from .equiprop import EqProp
+from .simulation import Netlist
+from .layers import Input
+from .data_collection.data_accumulator import DataAccumulator
+from .stat_reporting.accuracy import AccuracyReporter
+from .stat_reporting.loss import LossReporter
+from .stat_reporting.validation import TrainingValidator
+from .data_storage.save_load_history import HistoryLoader
 from .evaluator import Evaluator
 # >>>
+
+
+def _connected_layers(outputs):
+    """Every layer connected to the outputs, parents first."""
+    seen, stack = {}, list(outputs)
+    while stack:
+        layer = stack.pop()
+        if id(layer) not in seen:
+            seen[id(layer)] = layer
+            stack.extend(layer.parents + layer.children)
+    return sorted(seen.values(), key=lambda layer: layer.index)
+
 
 class Model:
 
     # constructor <<<
-    def __init__(self, inputs, outputs, n_processes_train=1, n_processes_test=1):
-        """
-        The model is a built as a graph, with some nodes designated as inputs, and others designated as outputs
-        """
-        self.inputs = inputs                        # list of inputs to the network
-        self.outputs = outputs                      # list of outputs of the network
+    def __init__(self, outputs, n_processes_train=1, n_processes_test=1, temperature=27):
+        self.outputs = list(outputs)
+        self.temperature = temperature
         self.n_processes_train = n_processes_train  # number of parallel processes
         self.n_processes_test = n_processes_test    # number of parallel processes
-        self._build_computation_graph(inputs)
+        self.layers = _connected_layers(self.outputs)
+        self.inputs = [layer for layer in self.layers if isinstance(layer, Input)]
+        names = [layer.name for layer in self.layers]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise ValueError(f"layer names must be unique: {duplicates}")
         self.fit_method_called = False
     # >>>
 
-    # buld graph <<<
-    def _build_computation_graph(self, inputs):
-        """
-        Use breadth-first traversal to make sure that parents are processed before their children
-        """
-        self.computation_graph = []
-        queue = []
-        visisted = []
+    # parameters <<<
+    def parameters(self):
+        return [p for layer in self.layers for p in layer.params.values()]
 
-        for input_layer in inputs:
-            queue.append(input_layer)
-
-        while queue:
-            current_layer = queue[0]
-            self.computation_graph.append(current_layer)
-
-            for connected_layer in current_layer.children:
-                if connected_layer not in visisted and connected_layer not in queue:
-                    queue.append(connected_layer)
-
-            visisted.append(current_layer)
-            queue.pop(0)
+    def trainable_parameters(self):
+        return [p for p in self.parameters() if p.trainable]
     # >>>
 
-    # write netlist <<<
+    def check_dataset(self, dataset, outputs=True):
+        missing = [layer.name for layer in self.inputs if layer.name not in dataset.inputs]
+        if missing:
+            raise KeyError(f"the dataset has no inputs for {missing}")
+        if outputs:
+            names = {layer.name for layer in self.outputs}
+            if set(dataset.outputs) != names:
+                raise KeyError(f"dataset outputs {sorted(dataset.outputs)} don't match the output layers {sorted(names)}")
+
+    # netlist <<<
     def build_netlist(self, inputs, sample_index=0):
-        netlist = Netlist()
-        for layer in self.computation_graph:
+        netlist = Netlist(temperature=self.temperature)
+        for layer in self.layers:
             layer.stamp(netlist.block(layer.name), inputs, sample_index)
         return netlist
 
@@ -90,6 +99,9 @@ class Model:
         """To resume, load the optimizer state and start at initial_epoch."""
         if not 0 <= initial_epoch < epochs:
             raise ValueError(f"need 0 <= initial_epoch < epochs, got {initial_epoch} and {epochs}")
+        self.check_dataset(train_data.dataset)
+        if validation_data is not None:
+            self.check_dataset(validation_data)
         self.fit_method_called = True
         self.dataset_size = len(train_data.dataset)
         self.batch_size = train_data.batch_size
