@@ -1,98 +1,29 @@
-# imports <<<
-import numpy as np
 import multiprocessing
+
+import numpy as np
+
+from .equiprop import EqProp
 
 # the workers inherit the model by forking
 Pool = multiprocessing.get_context("fork").Pool
-from .equiprop import EqProp
-from .stat_reporting.accuracy import AccuracyReporter
-# >>>
 
-class Evaluator:
-    def __init__(self, model, loss_fn=None):
-        self.model = model
-        self.loss_fn = loss_fn
-        self.accuracy_reporter = AccuracyReporter(model)
 
-    def _init_evaluation_variables(self, dataset):
-        """
-        Initialize model variables when the evaluate method is called
-        outside the fit method.
-        """
-        self.model.loss_fn = self.loss_fn
-        self.model.output_nodes = {}
-        for key, val in dataset.outputs.items():
-            self.model.output_nodes[key] = val.shape[1]
+def model_outputs(model, dataset):
+    n = model.n_processes_test
+    args = [(dataset.inputs, len(dataset), process_num, n) for process_num in range(n)]
+    with Pool(processes=n) as pool:
+        parts = pool.starmap(EqProp(model).infer, args)
+    # each process filled only its own samples
+    return {name: np.sum([part[name] for part in parts], axis=0) for name in parts[0]}
 
-    # evaluate method <<<
-    def evaluate(self, dataset, verbose=True):
-        """
-        Get model prediction and measure the accuracy.
-        """
-        if not self.model.fit_method_called:
-            self._init_evaluation_variables(dataset)
 
-        results = self._simulate_circuit(dataset, mode="evaluating")
-        prediction, losses = self._collect_outputs_evaluation(results)
-
-        accuracy = self.accuracy_reporter.measure_accuracy(dataset, prediction)
-        self.accuracy_reporter.print_accuracy(accuracy, verbose=verbose)
-
-        return accuracy, losses
-
-    def _collect_outputs_evaluation(self, results):
-        process_losses = {}
-        process_predictions = {}
-        for process_num in range(self.model.n_processes_test):
-            for k, v in self.model.output_nodes.items():
-                if process_num == 0:
-                    process_predictions[k] = np.zeros(shape=(self.dataset_size, v))
-                    process_losses[k] = np.zeros(shape=(v,))
-                process_predictions[k] += results[process_num]["process_predictions"][k]
-                process_losses[k] += results[process_num]["process_losses"][k] / self.dataset_size
-        return process_predictions, process_losses
-    # >>>
-
-    # predict method <<<
-    def predict(self, dataset):
-        """
-        Get model prediction only.
-        """
-        if not self.model.fit_method_called:
-            self._init_evaluation_variables(dataset)
-
-        results = self._simulate_circuit(dataset, mode="predicting")
-        output_voltages, predictions = self._collect_outputs_prediction(results)
-
-        return output_voltages, predictions
-
-    def _collect_outputs_prediction(self, results):
-        process_output = {}
-        process_prediction = {}
-        for process_num in range(self.model.n_processes_test):
-            for k, v in self.model.output_nodes.items():
-                if process_num == 0:
-                    process_output[k] = np.zeros(shape=(self.dataset_size, v))
-                    process_prediction[k] = np.zeros(shape=(self.dataset_size, v))
-                process_output[k] += results[process_num]["process_output"][k]
-                process_prediction[k] += results[process_num]["process_prediction"][k]
-        return process_output, process_prediction
-
-    # >>>
-
-    # simulate circuit <<<
-    def _simulate_circuit(self, dataset, mode):
-        X = dataset.inputs
-        Y = dataset.outputs
-
-        self.dataset_size = len(dataset)
-
-        # one task per process; each handles every n-th sample
-        n = self.model.n_processes_test
-        child_processes_args = [(X, Y, self.dataset_size, process_num, n) for process_num in range(n)]
-
-        algorithm = EqProp(self.model)
-        task = algorithm.evaluate if mode == "evaluating" else algorithm.predict
-        with Pool(processes=n) as pool:
-            return pool.starmap(task, child_processes_args)
-    # >>>
+def evaluate(model, dataset, loss, metrics):
+    """Mean loss and metrics: {"loss": {output: value}, metric name: {output: value}}."""
+    outputs = model_outputs(model, dataset)
+    results = {"loss": {}}
+    for name, y in outputs.items():
+        target = dataset.outputs[name]
+        results["loss"][name] = float(np.mean([loss[name](y[i], target[i])[0] for i in range(len(y))]))
+        for metric in metrics[name]:
+            results.setdefault(metric.name, {})[name] = float(np.mean(metric(y, target)))
+    return results

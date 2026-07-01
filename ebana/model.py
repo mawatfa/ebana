@@ -11,11 +11,11 @@ from .equiprop import EqProp
 from .simulation import Netlist
 from .layers import Input
 from .data_collection.data_accumulator import DataAccumulator
-from .stat_reporting.accuracy import AccuracyReporter
 from .stat_reporting.loss import LossReporter
 from .stat_reporting.validation import TrainingValidator
 from .data_storage.save_load_history import HistoryLoader
-from .evaluator import Evaluator
+from .monitor import Monitor
+from . import evaluator
 # >>>
 
 
@@ -63,6 +63,23 @@ class Model:
             names = {layer.name for layer in self.outputs}
             if set(dataset.outputs) != names:
                 raise KeyError(f"dataset outputs {sorted(dataset.outputs)} don't match the output layers {sorted(names)}")
+            for layer in self.outputs:
+                if dataset.output_sizes[layer.name] != layer.units:
+                    raise ValueError(f"output '{layer.name}' has {layer.units} units, the dataset has {dataset.output_sizes[layer.name]}")
+
+    def _per_output(self, loss, metrics):
+        """A loss or metrics given once are used for every output."""
+        names = [layer.name for layer in self.outputs]
+        if not isinstance(loss, dict):
+            loss = {name: loss for name in names}
+        if metrics is None:
+            metrics = []
+        if not isinstance(metrics, dict):
+            metrics = {name: list(metrics) for name in names}
+        for what, value in (("loss", loss), ("metrics", metrics)):
+            if set(value) != set(names):
+                raise KeyError(f"{what} given for {sorted(value)}, the outputs are {sorted(names)}")
+        return loss, metrics
 
     # netlist <<<
     def build_netlist(self, inputs, sample_index=0):
@@ -91,12 +108,16 @@ class Model:
         train_data: DataLoader,
         epochs: int,
         optimizer,
-        metrics,
-        loss_fn,
+        loss,
+        metrics=None,
         validation_data: Dataset | None = None,
         initial_epoch: int = 0,
+        monitor: Monitor | None = None,
     ):
-        """To resume, load the optimizer state and start at initial_epoch."""
+        """
+        loss and metrics are used for every output, or given per output in a
+        dict. To resume, load the optimizer state and start at initial_epoch.
+        """
         if not 0 <= initial_epoch < epochs:
             raise ValueError(f"need 0 <= initial_epoch < epochs, got {initial_epoch} and {epochs}")
         self.check_dataset(train_data.dataset)
@@ -111,13 +132,12 @@ class Model:
         self.validation_data = validation_data
         self.epochs = epochs
         self.optimizer = optimizer
-        self.metrics = metrics
-        self.loss_fn = loss_fn
+        self.loss, self.metrics = self._per_output(loss, metrics)
+        self.monitor = monitor or Monitor()
 
         self.accumulator = DataAccumulator(model=self)
-        self.accuracy_reporter = AccuracyReporter(model=self)
-        self.loss_reporter = LossReporter(model=self, total_loss=self.accumulator.total_loss)
-        self.training_validator = TrainingValidator(model=self, test_accuracy=self.accumulator.test_accuracy, metrics=self.metrics)
+        self.loss_reporter = LossReporter(model=self, accumulator=self.accumulator)
+        self.training_validator = TrainingValidator(model=self, accumulator=self.accumulator, monitor=self.monitor)
         self.history_loader = HistoryLoader(self.accumulator)
 
         for epoch_num in range(initial_epoch, self.epochs):
@@ -160,32 +180,33 @@ class Model:
                 # Optimize training parameters
                 optimizer.step()
 
-                # Print training loss per iteration
-                if self.metrics.verbose:
+                if self.monitor.verbose:
                     self.loss_reporter.print_iteration_loss(epoch_num, batch_num)
-                    self.loss_reporter.print_total_loss()
 
-                # Validate on test/validation dataset
                 if self.validation_data is not None:
                     self.training_validator.evaluate_validation(self.validation_data, epoch_num, batch_num)
+
+            if self.monitor.verbose:
+                self.loss_reporter.print_epoch_loss(epoch_num)
     # >>>
 
-    # evaluate method <<<
-    def evaluate(self, dataset, loss_fn=None, verbose=True):
-        """
-        Evaluate dataset and return accuracy.
-        """
-        evaluator = Evaluator(self, loss_fn=loss_fn)
-        return evaluator.evaluate(dataset, verbose=verbose)
-    # >>>
+    # evaluate and predict <<<
+    def evaluate(self, dataset, loss=None, metrics=None, verbose=True):
+        """Uses the loss and metrics of the last fit when none are given."""
+        self.check_dataset(dataset)
+        if loss is None:
+            if not self.fit_method_called:
+                raise ValueError("evaluate() needs a loss before the model has been fit")
+            loss = self.loss
+            metrics = self.metrics if metrics is None else metrics
+        loss, metrics = self._per_output(loss, metrics)
+        results = evaluator.evaluate(self, dataset, loss, metrics)
+        if verbose:
+            print("evaluation: " + "; ".join(
+                f"{key} " + ", ".join(f"{k} {v:.6g}" for k, v in values.items()) for key, values in results.items()))
+        return results
 
-    # predict method <<<
-    def predict(self, dataset, loss_fn=None, verbose=True):
-        """
-        Evaluate the network on the dataset and return the node voltages,
-        as well as the network predicton.
-        """
-        predictor = Evaluator(self, loss_fn=loss_fn)
-        return predictor.predict(dataset)
+    def predict(self, dataset):
+        self.check_dataset(dataset, outputs=False)
+        return evaluator.model_outputs(self, dataset)
     # >>>
-

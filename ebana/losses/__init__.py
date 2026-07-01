@@ -1,3 +1,1 @@
-from .base import BaseLoss
-from .mse import MSE, MSEProb
-from .crossentropy import CrossEntropyLoss
+from .losses import Loss, MSE, CrossEntropy, BinaryCrossEntropy, softmax, sigmoid

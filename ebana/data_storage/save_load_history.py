@@ -7,7 +7,7 @@ class HistoryLoader:
     def save_history(self, filepath):
         history = {
             "training_loss": self.accumulator.total_loss,
-            "test_accuracy": self.accumulator.test_accuracy,
+            "validation": self.accumulator.validation,
             "injected_currents": self.accumulator.injected_currents,
             **self.accumulator.get_data(),
         }
@@ -20,4 +20,4 @@ class HistoryLoader:
             history = pickle.load(handle)
 
         self.total_loss = history["training_loss"]
-        self.test_accuracy = history["test_accuracy"]
+        self.validation = history["validation"]

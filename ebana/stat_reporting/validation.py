@@ -1,20 +1,17 @@
-
 class TrainingValidator:
-    def __init__(self, model, test_accuracy, metrics):
+    def __init__(self, model, accumulator, monitor):
         self.model = model
-        self.test_accuracy = test_accuracy
-        self.metrics = metrics
+        self.accumulator = accumulator
+        self.monitor = monitor
 
     def evaluate_validation(self, dataset, epoch_num, batch_num):
-        if "epoch_num" in self.metrics.validate_every.keys():
-            if ((epoch_num % self.metrics.validate_every["epoch_num"] == 0) and (batch_num == self.model.num_batches - 1)):
-                accuracy, _ = self.model.evaluate(dataset, verbose=self.metrics.verbose)
-                for k in self.model.output_nodes.keys():
-                    self.test_accuracy[k][epoch_num] = accuracy[k]
-
-        elif "batch_num" in self.metrics.validate_every.keys():
-            if ((batch_num + 1) % self.metrics.validate_every["batch_num"] == 0) or ((epoch_num == self.model.epochs - 1) and (batch_num == self.model.num_batches)):
-                accuracy, _ = self.model.evaluate(dataset, verbose=self.metrics.verbose)
-                # TODO
-                # for k in self.model.output_nodes.keys():
-                #     self.test_accuracy[k][epoch_num][batch_num] = accuracy[k]
+        every = self.monitor.validate_every
+        last_batch = batch_num == self.model.num_batches - 1
+        if "epoch_num" in every:
+            due = last_batch and epoch_num % every["epoch_num"] == 0
+        else:
+            due = (batch_num + 1) % every["batch_num"] == 0 or (last_batch and epoch_num == self.model.epochs - 1)
+        if due:
+            results = self.model.evaluate(dataset, verbose=self.monitor.verbose)
+            if last_batch:
+                self.accumulator.store_validation(results, epoch_num)
