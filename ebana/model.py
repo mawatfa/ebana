@@ -7,7 +7,7 @@ import multiprocessing
 Pool = multiprocessing.get_context("fork").Pool
 
 from .dataset_handler import Dataset, DataLoader
-from .equiprop import EqProp
+from . import execution
 from .simulation import Netlist
 from .layers import Input
 from .data_collection.data_accumulator import DataAccumulator
@@ -45,6 +45,7 @@ class Model:
         if duplicates:
             raise ValueError(f"layer names must be unique: {duplicates}")
         self.fit_method_called = False
+        self.algorithm = None
     # >>>
 
     # parameters <<<
@@ -109,6 +110,7 @@ class Model:
         epochs: int,
         optimizer,
         loss,
+        algorithm,
         metrics=None,
         validation_data: Dataset | None = None,
         initial_epoch: int = 0,
@@ -132,6 +134,7 @@ class Model:
         self.validation_data = validation_data
         self.epochs = epochs
         self.optimizer = optimizer
+        self.algorithm = algorithm
         self.loss, self.metrics = self._per_output(loss, metrics)
         self.monitor = monitor or Monitor()
 
@@ -160,7 +163,7 @@ class Model:
 
                 # Run processes and get result
                 with Pool(processes=self.n_processes_train) as pool:
-                    results = pool.starmap(EqProp(self).train, child_processes_args)
+                    results = pool.starmap(execution.train_samples, [(self, *args) for args in child_processes_args])
 
                 #######################################################################
                 #                 Aggregate result from processes                     #

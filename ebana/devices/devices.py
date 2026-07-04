@@ -46,6 +46,12 @@ class Device(ABC):
     def gradient(self, a, b):
         pass
 
+    def spice_value(self, value):
+        return value
+
+    def alter(self, sim, elements, value):
+        sim.alter(elements, self.spice_value(np.asarray(value, dtype=float)))
+
 
 class Resistor(Device):
     """The value is the conductance."""
@@ -53,9 +59,11 @@ class Resistor(Device):
     def __init__(self, decimals=4):
         self.decimals = decimals    # rounding of the resistance in the netlist
 
+    def spice_value(self, value):
+        return 1 / value if self.decimals is None else np.round(1 / value, self.decimals)
+
     def stamp(self, block, id, a, b, value):
-        resistance = 1 / value if self.decimals is None else np.round(1 / value, self.decimals)
-        return block.resistor(id, a, b, resistance)
+        return block.resistor(id, a, b, self.spice_value(value))
 
     def measure(self, sim, elements):
         return voltage_across(sim, elements)
@@ -106,6 +114,9 @@ class BidirectionalAmplifier(Device):
     def measure(self, sim, elements):
         inputs = np.vectorize(lambda e: e.nodes[0], otypes=[object])(elements)
         return -sim.currents(elements) * sim.voltages(inputs)
+
+    def alter(self, sim, elements, value):
+        raise NotImplementedError("the gain is part of the expressions; rebuild the netlist instead")
 
     def gradient(self, a, b):
         return b - a

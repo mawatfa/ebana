@@ -9,14 +9,15 @@ CHECKPOINT_VERSION = 2
 class BaseOptimizer(ABC):
     """
     Subclasses list the arrays they keep for each parameter in `slots` and
-    implement compute_update.
+    implement compute_update. The transforms are applied to the gradients
+    first.
     """
 
     slots = ()
 
-    def __init__(self, model, beta):
+    def __init__(self, model, transforms=()):
         self.model = model
-        self.beta = beta
+        self.transforms = list(transforms)
         self.iterations = 0
         self.state = {
             p.full_name: {slot: np.zeros(p.shape) for slot in self.slots}
@@ -29,7 +30,9 @@ class BaseOptimizer(ABC):
 
     def step(self):
         for p in self.model.trainable_parameters():
-            grad = p.grad / (self.model.batch_size * self.beta)
+            grad = p.grad
+            for transform in self.transforms:
+                grad = transform(p, grad)
             update = self.compute_update(grad, self.state[p.full_name])
             p.apply_update(update, self.iterations)
         self.iterations += 1

@@ -3,8 +3,8 @@ from .datacollector import DataCollector
 class ProcessDataAccumulator:
     def __init__(self, model, batch_size):
         self.model = model
-        self.collector = DataCollector(batch_size)
-        self.enabled = self.model.metrics.save_phase_data
+        self.collector = DataCollector(batch_size, phases=model.algorithm.phases)
+        self.enabled = self.model.monitor.save_phase_data
         for layer in self.model.layers:
             self.collector.add_layer_specs(layer, phase_specs=self.enabled, batch_specs=False)
 

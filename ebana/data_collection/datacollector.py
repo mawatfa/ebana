@@ -1,7 +1,7 @@
 import numpy as np
 
 class DataCollector:
-    def __init__(self, batch_size, num_batches=None, epochs=None, phases=["free", "nudge"]):
+    def __init__(self, batch_size, num_batches=None, epochs=None, phases=("free",)):
         self.batch_size = batch_size
         self.num_batches = num_batches
         self.epochs = epochs

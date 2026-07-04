@@ -32,7 +32,7 @@ class DataAccumulator:
                 history[k][epoch_num] = value
 
     def __initialize_data_collection(self):
-        self.collector = DataCollector(self.batch_size, self.num_batches, self.num_epochs)
+        self.collector = DataCollector(self.batch_size, self.num_batches, self.num_epochs, phases=self.model.algorithm.phases)
         for layer in self.model.layers:
             save_phase_data = self.model.monitor.save_phase_data
             save_batch_data = self.model.monitor.save_batch_data
@@ -92,6 +92,8 @@ class DataAccumulator:
             for k in self.output_nodes:
                 process_losses[k] = process_losses.get(k, 0.0) + results[process_num]["process_losses"][k]
 
+        for p in self.model.trainable_parameters():
+            p.grad /= self.batch_size
         for k in self.output_nodes:
             self.total_loss[k][epoch_num][batch_num] = process_losses[k] / self.batch_size
 

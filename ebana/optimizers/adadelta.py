@@ -7,10 +7,10 @@ class Adadelta(BaseOptimizer):
 
     slots = ("grad_sq", "update_sq")
 
-    def __init__(self, model, beta, rho=0.95, eps=1e-6):
+    def __init__(self, model, rho=0.95, eps=1e-6, transforms=()):
         self.rho = rho
         self.eps = eps
-        super().__init__(model, beta)
+        super().__init__(model, transforms)
 
     def compute_update(self, grad, state):
         state["grad_sq"] = self.rho * state["grad_sq"] + (1 - self.rho) * grad**2

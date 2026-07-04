@@ -2,7 +2,7 @@ import multiprocessing
 
 import numpy as np
 
-from .equiprop import EqProp
+from . import execution
 
 # the workers inherit the model by forking
 Pool = multiprocessing.get_context("fork").Pool
@@ -10,9 +10,9 @@ Pool = multiprocessing.get_context("fork").Pool
 
 def model_outputs(model, dataset):
     n = model.n_processes_test
-    args = [(dataset.inputs, len(dataset), process_num, n) for process_num in range(n)]
+    args = [(model, dataset.inputs, len(dataset), process_num, n) for process_num in range(n)]
     with Pool(processes=n) as pool:
-        parts = pool.starmap(EqProp(model).infer, args)
+        parts = pool.starmap(execution.infer_samples, args)
     # each process filled only its own samples
     return {name: np.sum([part[name] for part in parts], axis=0) for name in parts[0]}
 

@@ -7,11 +7,11 @@ class Adam(BaseOptimizer):
 
     slots = ("m", "v")
 
-    def __init__(self, model, beta, gamma_m=0.9, gamma_v=0.999, eps=1e-8):
+    def __init__(self, model, gamma_m=0.9, gamma_v=0.999, eps=1e-8, transforms=()):
         self.gamma_m = gamma_m
         self.gamma_v = gamma_v
         self.eps = eps
-        super().__init__(model, beta)
+        super().__init__(model, transforms)
 
     def compute_update(self, grad, state):
         state["m"] = self.gamma_m * state["m"] + (1 - self.gamma_m) * grad
