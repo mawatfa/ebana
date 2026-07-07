@@ -32,6 +32,8 @@ class Simulator:
             self.session.send_command(f"alter {element.name}={float(value)!r}")
 
     def solve(self):
+        # old results slow down every run
+        self.session.send_command("destroy all")
         self.session.run(simulations.OP())
 
     def voltages(self, nets):

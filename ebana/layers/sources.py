@@ -26,6 +26,9 @@ class Input(SourceLayer):
             self.shape,
         )
 
+    def set_sample(self, sim, data, sample_index):
+        self.device.alter(sim, self.sources, np.reshape(data[self.name][sample_index], self.shape))
+
     def record(self, sim):
         return {**super().record(sim), "sources": {"measurement": self.device.measure(sim, self.sources)}}
 

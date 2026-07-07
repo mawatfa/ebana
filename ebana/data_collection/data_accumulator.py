@@ -9,7 +9,6 @@ class DataAccumulator:
         self.batch_size = self.model.batch_size
         self.num_batches = self.model.num_batches
         self.num_epochs = self.model.epochs
-        self.n_processes_train = self.model.n_processes_train
         self.__initialize_data_collection()
         self.__initialize_injected_current()
         # mean loss per sample: {output: (epochs, batches)}
@@ -50,14 +49,14 @@ class DataAccumulator:
                         self.injected_currents[k][epoch][batch] = np.zeros(shape=(self.batch_size, v))
 
     def save_variables_not_needing_aggregation(self, results, epoch_num, batch_num):
-        for process_num in range(self.n_processes_train):
+        for result in results:
 
             for layer in self.model.layers:
 
                 # Save per phase data
                 if layer.save_sim_data:
                     if self.model.monitor.save_phase_data:
-                        layer_data = results[process_num]["process_layer_collected_data"][layer.name]
+                        layer_data = result["recorded"][layer.name]
                         for phase_group in layer_data.keys():
                             for data_key in layer_data[phase_group].keys():
                                 for phase in layer_data[phase_group][data_key].keys():
@@ -65,8 +64,9 @@ class DataAccumulator:
                                     self.collector.store_phase_data(layer.name, phase_group, data_key, epoch_num, batch_num, phase, data)
 
             if self.model.monitor.save_injected_currents:
-                for k, _ in self.output_nodes.items():
-                    self.injected_currents[k][epoch_num][batch_num] += results[process_num]["process_injected_currents"][k]
+                for idx, forces in result["forces"].items():
+                    for k, f in forces.items():
+                        self.injected_currents[k][epoch_num][batch_num][idx] = f
 
 
         # Save per batch data
@@ -80,17 +80,10 @@ class DataAccumulator:
     def _save_variables_needing_aggregation(self, results, epoch_num, batch_num):
         process_losses = {}
 
-        for process_num in range(self.n_processes_train):
-
-            # (a). Gradients: sum over all samples of the batch.
-            for p in self.model.trainable_parameters():
-                if process_num == 0:
-                    p.grad = np.zeros(p.shape)
-                p.grad += results[process_num]["process_parameter_gradients"][p.full_name]
-
-            # (b). Losses (sums over each process's samples)
-            for k in self.output_nodes:
-                process_losses[k] = process_losses.get(k, 0.0) + results[process_num]["process_losses"][k]
+        for p in self.model.trainable_parameters():
+            p.grad = sum(result["grads"][p.full_name] for result in results)
+        for k in self.output_nodes:
+            process_losses[k] = sum(result["losses"][k] for result in results)
 
         for p in self.model.trainable_parameters():
             p.grad /= self.batch_size

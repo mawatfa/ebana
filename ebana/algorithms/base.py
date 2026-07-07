@@ -11,6 +11,7 @@ class SampleCircuit:
         self.model = model
         self.sim = sim
         self.on_solve = on_solve    # on_solve(phase, sim), called after every named solve
+        self._set, self._nudged = {}, {}
 
     @property
     def parameters(self):
@@ -30,11 +31,21 @@ class SampleCircuit:
     def set(self, parameter, value):
         """Change the parameter's elements in the loaded circuit (not the parameter's value)."""
         parameter.device.alter(self.sim, parameter.elements, value)
+        self._set[parameter.full_name] = parameter
 
     def nudge(self, forces):
         """Push each output with its force in amperes."""
         for layer in self.model.outputs:
             self.sim.alter(*layer.nudge(forces[layer.name]))
+            self._nudged[layer.name] = layer
+
+    def restore(self):
+        """Undo set() and nudge() before the next sample."""
+        for p in self._set.values():
+            p.device.alter(self.sim, p.elements, p.value)
+        for layer in self._nudged.values():
+            self.sim.alter(*layer.nudge(np.zeros(layer.units)))
+        self._set, self._nudged = {}, {}
 
 
 @dataclass

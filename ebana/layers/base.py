@@ -4,6 +4,8 @@ A layer is connected like y = Dense(...)(x) and implements:
   build(inputs)                   create the parameters and return the output nets
   stamp(block, data, index)       add the elements to the netlist and store the
                                   handles in parameter.elements
+  set_sample(sim, data, index)    only for layers that depend on the data, like
+                                  Input: alter the loaded circuit for another sample
 """
 
 import itertools
@@ -111,6 +113,9 @@ class Layer(ABC):
 
     @abstractmethod
     def stamp(self, block, data, sample_index):
+        pass
+
+    def set_sample(self, sim, data, sample_index):
         pass
 
     # recording (used when save_sim_data=True) <<<

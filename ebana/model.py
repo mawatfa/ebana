@@ -1,11 +1,6 @@
 """The model: a circuit made of connected layers, and its training loop."""
 
 # imports <<<
-import multiprocessing
-
-# the workers inherit the model by forking
-Pool = multiprocessing.get_context("fork").Pool
-
 from .dataset_handler import Dataset, DataLoader
 from . import execution
 from .simulation import Netlist
@@ -33,11 +28,9 @@ def _connected_layers(outputs):
 class Model:
 
     # constructor <<<
-    def __init__(self, outputs, n_processes_train=1, n_processes_test=1, temperature=27):
+    def __init__(self, outputs, temperature=27):
         self.outputs = list(outputs)
         self.temperature = temperature
-        self.n_processes_train = n_processes_train  # number of parallel processes
-        self.n_processes_test = n_processes_test    # number of parallel processes
         self.layers = _connected_layers(self.outputs)
         self.inputs = [layer for layer in self.layers if isinstance(layer, Input)]
         names = [layer.name for layer in self.layers]
@@ -46,6 +39,14 @@ class Model:
             raise ValueError(f"layer names must be unique: {duplicates}")
         self.fit_method_called = False
         self.algorithm = None
+        self._workers = None
+
+    # the workers only need the circuit
+    _NOT_PICKLED = ("_workers", "optimizer", "accumulator", "loss_reporter", "training_validator",
+                    "history_loader", "train_data", "validation_data")
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items() if k not in self._NOT_PICKLED} | {"_workers": None}
     # >>>
 
     # parameters <<<
@@ -115,10 +116,12 @@ class Model:
         validation_data: Dataset | None = None,
         initial_epoch: int = 0,
         monitor: Monitor | None = None,
+        workers: int = 1,
     ):
         """
         loss and metrics are used for every output, or given per output in a
         dict. To resume, load the optimizer state and start at initial_epoch.
+        Samples are simulated in `workers` processes (0: in this process).
         """
         if not 0 <= initial_epoch < epochs:
             raise ValueError(f"need 0 <= initial_epoch < epochs, got {initial_epoch} and {epochs}")
@@ -143,49 +146,24 @@ class Model:
         self.training_validator = TrainingValidator(model=self, accumulator=self.accumulator, monitor=self.monitor)
         self.history_loader = HistoryLoader(self.accumulator)
 
+        with execution.Workers(self, workers) as self._workers:
+            try:
+                self._train(initial_epoch)
+            finally:
+                self._workers = None
+
+    def _train(self, initial_epoch):
         for epoch_num in range(initial_epoch, self.epochs):
             self.epoch_num = epoch_num
-
-            for batch_num, training_batch in enumerate(train_data.batches(epoch_num)):
+            for batch_num, batch in enumerate(self.train_data.batches(epoch_num)):
                 self.batch_num = batch_num + 1
-
-                # type: dict { key = input layer name, value = 2D numpy array of inputs }
-                X = training_batch.inputs
-                Y = training_batch.outputs
-
-                #######################################################################
-                #                           Multiprocessing                           #
-                #######################################################################
-                # Prepare arguments for the processes
-                child_processes_args = []
-                for process_num in range(self.n_processes_train):
-                    child_processes_args.append((X, Y, self.batch_size, process_num, self.n_processes_train))
-
-                # Run processes and get result
-                with Pool(processes=self.n_processes_train) as pool:
-                    results = pool.starmap(execution.train_samples, [(self, *args) for args in child_processes_args])
-
-                #######################################################################
-                #                 Aggregate result from processes                     #
-                #######################################################################
-                # The `results` variable is a list of `self.n_processes_train` elements.
-                # Each element is a dictionary.
-
-                ##  1. Some of the elements from the dictionary such as voltag_drops and losses have to be aggregated.
+                results = self._workers.train(batch.inputs, batch.outputs)
                 self.accumulator._save_variables_needing_aggregation(results, epoch_num, batch_num)
-
-                ##  2. Other elements require no aggregation.
                 self.accumulator.save_variables_not_needing_aggregation(results, epoch_num, batch_num)
-
-                #######################################################################
-                #                          Batch Post Processing                      #
-                #######################################################################
-                # Optimize training parameters
-                optimizer.step()
+                self.optimizer.step()
 
                 if self.monitor.verbose:
                     self.loss_reporter.print_iteration_loss(epoch_num, batch_num)
-
                 if self.validation_data is not None:
                     self.training_validator.evaluate_validation(self.validation_data, epoch_num, batch_num)
 
@@ -194,7 +172,13 @@ class Model:
     # >>>
 
     # evaluate and predict <<<
-    def evaluate(self, dataset, loss=None, metrics=None, verbose=True):
+    def _outputs(self, dataset, workers):
+        if self._workers is not None:
+            return self._workers.infer(dataset.inputs, len(dataset))
+        with execution.Workers(self, workers) as w:
+            return w.infer(dataset.inputs, len(dataset))
+
+    def evaluate(self, dataset, loss=None, metrics=None, verbose=True, workers=1):
         """Uses the loss and metrics of the last fit when none are given."""
         self.check_dataset(dataset)
         if loss is None:
@@ -203,13 +187,13 @@ class Model:
             loss = self.loss
             metrics = self.metrics if metrics is None else metrics
         loss, metrics = self._per_output(loss, metrics)
-        results = evaluator.evaluate(self, dataset, loss, metrics)
+        results = evaluator.evaluate(self._outputs(dataset, workers), dataset, loss, metrics)
         if verbose:
             print("evaluation: " + "; ".join(
                 f"{key} " + ", ".join(f"{k} {v:.6g}" for k, v in values.items()) for key, values in results.items()))
         return results
 
-    def predict(self, dataset):
+    def predict(self, dataset, workers=1):
         self.check_dataset(dataset, outputs=False)
-        return evaluator.model_outputs(self, dataset)
+        return self._outputs(dataset, workers)
     # >>>
