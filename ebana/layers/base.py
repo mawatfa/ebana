@@ -80,10 +80,9 @@ _connection_order = itertools.count()
 
 
 class Layer(ABC):
-    def __init__(self, name, save_sim_data=False):
-        self.index = None           # set when the layer is connected
+    def __init__(self, name):
+        self.index = None
         self.name = name.lower()
-        self.save_sim_data = save_sim_data
         self.parents = []
         self.children = []
         self.params = {}
@@ -118,21 +117,6 @@ class Layer(ABC):
     def set_sample(self, sim, data, sample_index):
         pass
 
-    # recording (used when save_sim_data=True) <<<
-    def record_spec(self):
-        """Shapes of what `record` returns, grouped like `record`'s result."""
-        spec = {"voltages": {"output": self.output_shape}}
-        if self.params:
-            spec["parameters"] = {name: p.shape for name, p in self.params.items()}
-        return spec
-
-    def record(self, sim):
-        data = {"voltages": {"output": sim.voltages(self.output)}}
-        if self.params:
-            data["parameters"] = {name: p.measure(sim) for name, p in self.params.items()}
-        return data
-    # >>>
-
     def __repr__(self):
         return f"{type(self).__name__}({self.name!r})"
 
@@ -140,8 +124,8 @@ class Layer(ABC):
 class SourceLayer(Layer):
     """A layer without parents, built when created."""
 
-    def __init__(self, name, save_sim_data=False):
-        super().__init__(name, save_sim_data=save_sim_data)
+    def __init__(self, name):
+        super().__init__(name)
         self.output = np.asarray(self.build([]), dtype=object)
         self.index = next(_connection_order)
 

@@ -1,17 +1,12 @@
-"""The model: a circuit made of connected layers, and its training loop."""
+import numpy as np
 
-# imports <<<
-from .dataset_handler import Dataset, DataLoader
-from . import execution
-from .simulation import Netlist
-from .layers import Input
-from .data_collection.data_accumulator import DataAccumulator
-from .stat_reporting.loss import LossReporter
-from .stat_reporting.validation import TrainingValidator
-from .data_storage.save_load_history import HistoryLoader
-from .monitor import Monitor
 from . import evaluator
-# >>>
+from .callbacks import History
+from .dataset_handler import Dataset, DataLoader
+from .execution import Workers
+from .layers import Input
+from .simulation import Netlist
+from .training import Training
 
 
 def _connected_layers(outputs):
@@ -37,24 +32,46 @@ class Model:
         duplicates = sorted({n for n in names if names.count(n) > 1})
         if duplicates:
             raise ValueError(f"layer names must be unique: {duplicates}")
-        self.fit_method_called = False
-        self.algorithm = None
-        self._workers = None
-
-    # the workers only need the circuit
-    _NOT_PICKLED = ("_workers", "optimizer", "accumulator", "loss_reporter", "training_validator",
-                    "history_loader", "train_data", "validation_data")
-
-    def __getstate__(self):
-        return {k: v for k, v in self.__dict__.items() if k not in self._NOT_PICKLED} | {"_workers": None}
     # >>>
 
-    # parameters <<<
+    # layers and parameters <<<
+    def layer(self, name):
+        for layer in self.layers:
+            if layer.name == name:
+                return layer
+        raise KeyError(f"no layer named '{name}'")
+
     def parameters(self):
         return [p for layer in self.layers for p in layer.params.values()]
 
     def trainable_parameters(self):
         return [p for p in self.parameters() if p.trainable]
+
+    def parameter(self, full_name):
+        for p in self.parameters():
+            if p.full_name == full_name:
+                return p
+        raise KeyError(f"no parameter named '{full_name}'")
+
+    def parameter_values(self):
+        return {p.full_name: p.value.copy() for p in self.parameters()}
+
+    def set_parameter_values(self, values):
+        params = {p.full_name: p for p in self.parameters()}
+        if set(values) != set(params):
+            raise ValueError(f"parameters {sorted(values)} don't match the model's {sorted(params)}")
+        for name, p in params.items():
+            if np.shape(values[name]) != p.shape:
+                raise ValueError(f"parameter '{name}' has shape {np.shape(values[name])}, expected {p.shape}")
+        for name, p in params.items():
+            p.value = np.array(values[name], dtype=float)
+
+    def save_parameters(self, path):
+        np.savez(path, **self.parameter_values())
+
+    def load_parameters(self, path):
+        with np.load(path) as data:
+            self.set_parameter_values({k: data[k] for k in data.files})
     # >>>
 
     def check_dataset(self, dataset, outputs=True):
@@ -95,105 +112,36 @@ class Model:
             f.write(str(self.build_netlist(dataset.inputs, sample)))
     # >>>
 
-    # history saver/loader <<<
-    def save_history(self, filepath):
-        self.history_loader.save_history(filepath)
-
-    def load_history(self, filepath):
-        self.history_loader.load_history(filepath)
-    # >>>
-
-    # fit method <<<
-    def fit(
-        self,
-        *,
-        train_data: DataLoader,
-        epochs: int,
-        optimizer,
-        loss,
-        algorithm,
-        metrics=None,
-        validation_data: Dataset | None = None,
-        initial_epoch: int = 0,
-        monitor: Monitor | None = None,
-        workers: int = 1,
-    ):
+    # training <<<
+    def fit(self, *, train_data, epochs, optimizer, loss, algorithm, metrics=None, validation_data=None,
+            validation_freq=1, callbacks=(), checkpoint=None, checkpoint_every=None, resume=None, workers=1):
         """
         loss and metrics are used for every output, or given per output in a
-        dict. To resume, load the optimizer state and start at initial_epoch.
+        dict. The run is saved to `checkpoint` after every epoch (and every
+        `checkpoint_every` batches) and continues exactly from `resume`.
         Samples are simulated in `workers` processes (0: in this process).
+        Returns the History.
         """
-        if not 0 <= initial_epoch < epochs:
-            raise ValueError(f"need 0 <= initial_epoch < epochs, got {initial_epoch} and {epochs}")
         self.check_dataset(train_data.dataset)
         if validation_data is not None:
             self.check_dataset(validation_data)
-        self.fit_method_called = True
-        self.dataset_size = len(train_data.dataset)
-        self.batch_size = train_data.batch_size
-        self.output_nodes = train_data.dataset.output_sizes
-        self.num_batches = len(train_data)
-        self.train_data = train_data
-        self.validation_data = validation_data
-        self.epochs = epochs
-        self.optimizer = optimizer
-        self.algorithm = algorithm
-        self.loss, self.metrics = self._per_output(loss, metrics)
-        self.monitor = monitor or Monitor()
+        loss, metrics = self._per_output(loss, metrics)
+        training = Training(
+            self, train_data=train_data, epochs=epochs, optimizer=optimizer, loss=loss, metrics=metrics,
+            algorithm=algorithm, validation_data=validation_data, validation_freq=validation_freq,
+            callbacks=callbacks, checkpoint=checkpoint, checkpoint_every=checkpoint_every, workers=workers,
+        )
+        return training.run(resume)
 
-        self.accumulator = DataAccumulator(model=self)
-        self.loss_reporter = LossReporter(model=self, accumulator=self.accumulator)
-        self.training_validator = TrainingValidator(model=self, accumulator=self.accumulator, monitor=self.monitor)
-        self.history_loader = HistoryLoader(self.accumulator)
-
-        with execution.Workers(self, workers) as self._workers:
-            try:
-                self._train(initial_epoch)
-            finally:
-                self._workers = None
-
-    def _train(self, initial_epoch):
-        for epoch_num in range(initial_epoch, self.epochs):
-            self.epoch_num = epoch_num
-            for batch_num, batch in enumerate(self.train_data.batches(epoch_num)):
-                self.batch_num = batch_num + 1
-                results = self._workers.train(batch.inputs, batch.outputs)
-                self.accumulator._save_variables_needing_aggregation(results, epoch_num, batch_num)
-                self.accumulator.save_variables_not_needing_aggregation(results, epoch_num, batch_num)
-                self.optimizer.step()
-
-                if self.monitor.verbose:
-                    self.loss_reporter.print_iteration_loss(epoch_num, batch_num)
-                if self.validation_data is not None:
-                    self.training_validator.evaluate_validation(self.validation_data, epoch_num, batch_num)
-
-            if self.monitor.verbose:
-                self.loss_reporter.print_epoch_loss(epoch_num)
-    # >>>
-
-    # evaluate and predict <<<
-    def _outputs(self, dataset, workers):
-        if self._workers is not None:
-            return self._workers.infer(dataset.inputs, len(dataset))
-        with execution.Workers(self, workers) as w:
+    def predict(self, dataset, algorithm=None, workers=1):
+        """Free phase outputs, unless the algorithm has its own predict_step."""
+        self.check_dataset(dataset, outputs=False)
+        with Workers(self, workers, algorithm) as w:
             return w.infer(dataset.inputs, len(dataset))
 
-    def evaluate(self, dataset, loss=None, metrics=None, verbose=True, workers=1):
-        """Uses the loss and metrics of the last fit when none are given."""
+    def evaluate(self, dataset, loss, metrics=None, algorithm=None, workers=1):
         self.check_dataset(dataset)
-        if loss is None:
-            if not self.fit_method_called:
-                raise ValueError("evaluate() needs a loss before the model has been fit")
-            loss = self.loss
-            metrics = self.metrics if metrics is None else metrics
         loss, metrics = self._per_output(loss, metrics)
-        results = evaluator.evaluate(self._outputs(dataset, workers), dataset, loss, metrics)
-        if verbose:
-            print("evaluation: " + "; ".join(
-                f"{key} " + ", ".join(f"{k} {v:.6g}" for k, v in values.items()) for key, values in results.items()))
-        return results
-
-    def predict(self, dataset, workers=1):
-        self.check_dataset(dataset, outputs=False)
-        return self._outputs(dataset, workers)
+        outputs = self.predict(dataset, algorithm, workers)
+        return evaluator.summary(evaluator.sample_losses(outputs, dataset.outputs, loss), outputs, dataset.outputs, metrics)
     # >>>

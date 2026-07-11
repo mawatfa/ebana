@@ -57,8 +57,6 @@ class StepResult:
 
 
 class LearningAlgorithm(ABC):
-    phases = ("free",)
-
     @abstractmethod
     def train_step(self, circuit, targets, loss):
         """Return the StepResult of one sample. loss maps output names to losses."""

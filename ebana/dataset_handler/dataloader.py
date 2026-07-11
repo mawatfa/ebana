@@ -5,8 +5,9 @@ from .dataset import Dataset
 
 class DataLoader:
     """
-    Yields the full batches of an epoch. When shuffling, the order depends
-    only on (seed, epoch), so a resumed run sees the same batches.
+    Yields (indices, batch) for the full batches of an epoch. When shuffling,
+    the order depends only on (seed, epoch), so a resumed run sees the same
+    batches.
     """
 
     def __init__(self, dataset, batch_size, shuffle=False, seed=None):
@@ -28,4 +29,5 @@ class DataLoader:
         else:
             order = np.arange(n)
         for b in range(len(self)):
-            yield self.dataset[order[b * self.batch_size : (b + 1) * self.batch_size]]
+            indices = order[b * self.batch_size: (b + 1) * self.batch_size]
+            yield indices, self.dataset[indices]

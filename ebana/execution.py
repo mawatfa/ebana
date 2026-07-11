@@ -1,76 +1,79 @@
 """Worker processes. Each one keeps a copy of the model and simulates a share of the samples."""
 
 import multiprocessing
-from functools import partial
+from types import SimpleNamespace
 
 import numpy as np
 
 from .algorithms.base import SampleCircuit, free_outputs
-from .data_collection.process_data_accumulator import ProcessDataAccumulator
 from .simulation import Simulator
 
-_model = None   # this process's copy of the model
+_job = None
 
 
-def _start(model):
-    global _model
-    _model = model
+def _start(model, algorithm, loss, probes):
+    global _job
+    _job = SimpleNamespace(model=model, algorithm=algorithm, loss=loss, probes=probes)
 
 
 def _samples(values, X):
     # the netlist is loaded once, then the layers alter it for every sample
-    for p in _model.parameters():
+    model = _job.model
+    for p in model.parameters():
         p.value = values[p.full_name]
     sim = Simulator()
-    sim.load(_model.build_netlist(X, 0))
+    sim.load(model.build_netlist(X, 0))
     for i in range(len(next(iter(X.values())))):
-        for layer in _model.layers:
+        for layer in model.layers:
             layer.set_sample(sim, X, i)
         yield i, sim
 
 
-def _train(values, X, Y, indices, batch_size):
-    model = _model
+def _train(values, X, Y, positions, probe_names):
+    model, probes = _job.model, {name: _job.probes[name] for name in probe_names}
     grads = {p.full_name: np.zeros(p.shape) for p in model.trainable_parameters()}
-    losses = {name: 0.0 for name in Y}
-    forces = {}
-    recorder = ProcessDataAccumulator(model, batch_size)
+    samples = {}
     for i, sim in _samples(values, X):
-        circuit = SampleCircuit(model, sim, partial(recorder.save_metrics_during_training, indices[i]))
-        result = model.algorithm.train_step(circuit, {k: v[i] for k, v in Y.items()}, model.loss)
+        measured = {name: {} for name in probes}
+
+        def on_solve(phase, sim):
+            for name, probe in probes.items():
+                measured[name][phase] = probe(model, sim)
+
+        circuit = SampleCircuit(model, sim, on_solve if probes else None)
+        result = _job.algorithm.train_step(circuit, {k: v[i] for k, v in Y.items()}, _job.loss)
         circuit.restore()
         for name, g in result.grads.items():
             grads[name] += g
-        for name, value in result.losses.items():
-            losses[name] += value
-        forces[indices[i]] = result.forces
-    return {"grads": grads, "losses": losses, "forces": forces, "recorded": recorder.get_data()}
+        samples[positions[i]] = {"loss": result.losses, "output": result.outputs,
+                                 "force": result.forces, "probes": measured}
+    return {"grads": grads, "samples": samples}
 
 
-def _infer(values, X, indices):
-    outputs, algorithm = {}, _model.algorithm
+def _infer(values, X, positions):
+    outputs, algorithm = {}, _job.algorithm
     for i, sim in _samples(values, X):
-        circuit = SampleCircuit(_model, sim)
-        outputs[indices[i]] = algorithm.predict_step(circuit) if algorithm is not None else free_outputs(circuit)
+        circuit = SampleCircuit(_job.model, sim)
+        outputs[positions[i]] = algorithm.predict_step(circuit) if algorithm is not None else free_outputs(circuit)
         circuit.restore()
     return outputs
 
 
 class Workers:
     """
-    `n` processes, each holding a copy of `model` (n=0: run in this process).
-    Every task carries the current parameter values, so the copies never go
-    stale. The model is pickled, so hooks it holds (grad_func, update_func,
-    schedules...) must be picklable: module-level functions, not lambdas.
+    n processes (0 runs everything in this process). Every task sends the
+    current parameter values. The model, algorithm, loss and probes are
+    pickled, so functions they hold must be defined at module level.
     """
 
-    def __init__(self, model, n):
+    def __init__(self, model, n, algorithm=None, loss=None, probes=None):
         self.model, self.n = model, n
+        args = (model, algorithm, loss, probes or {})
         if n:
-            self.pool = multiprocessing.get_context().Pool(n, _start, (model,))
+            self.pool = multiprocessing.get_context().Pool(n, _start, args)
         else:
             self.pool = None
-            _start(model)
+            _start(*args)
 
     def __enter__(self):
         return self
@@ -92,9 +95,15 @@ class Workers:
             return [task(*a) for a in args]
         return self.pool.starmap(task, args)
 
-    def train(self, X, Y):
+    def train(self, X, Y, probe_names=()):
+        """The gradients summed over the batch, and the results of each sample in batch order."""
         n = len(next(iter(Y.values())))
-        return self._map(_train, n, (X, Y), n)
+        parts = self._map(_train, n, (X, Y), list(probe_names))
+        grads = {name: sum(part["grads"][name] for part in parts) for name in parts[0]["grads"]}
+        samples = {}
+        for part in parts:
+            samples.update(part["samples"])
+        return grads, [samples[i] for i in range(n)]
 
     def infer(self, X, n_samples):
         per_sample = {}

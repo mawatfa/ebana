@@ -12,9 +12,8 @@ class Dense(Layer):
     """A crossbar from every input net to every output net. weight has shape (inputs, units)."""
 
     def __init__(self, name, units, initializer=None, device=None, lr=0.0, trainable=True,
-                 constraint=MaxRelativeChange(0.5), grad_func=None, update_func=None,
-                 save_sim_data=False):
-        super().__init__(name, save_sim_data=save_sim_data)
+                 constraint=MaxRelativeChange(0.5), grad_func=None, update_func=None):
+        super().__init__(name)
         self.units = units
         self.initializer = initializer
         self.device = device or Resistor()
@@ -68,8 +67,8 @@ class LocallyConnected2D(Layer):
 
     def __init__(self, name, kernel_size, stride, filters, padding="valid", initializer=None, device=None,
                  lr=0.0, trainable=True, constraint=MaxRelativeChange(0.5), grad_func=None,
-                 update_func=None, save_sim_data=False):
-        super().__init__(name, save_sim_data=save_sim_data)
+                 update_func=None):
+        super().__init__(name)
         self.kernel_size, self.stride, self.filters, self.padding = tuple(kernel_size), tuple(stride), filters, padding
         self.initializer = initializer
         self.device = device or Resistor()
@@ -112,8 +111,8 @@ class AveragePooling2D(Layer):
     """
 
     def __init__(self, name, pool_size=(2, 2), strides=None, padding="valid", initializer=None,
-                 device=None, lr=0.0, trainable=False, constraint=None, save_sim_data=False):
-        super().__init__(name, save_sim_data=save_sim_data)
+                 device=None, lr=0.0, trainable=False, constraint=None):
+        super().__init__(name)
         self.pool_size = tuple(pool_size)
         self.strides = tuple(strides) if strides is not None else self.pool_size
         self.padding = padding

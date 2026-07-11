@@ -68,9 +68,3 @@ class Ammeter(Layer):
 
     def currents(self, sim):
         return sim.currents(self.meters)
-
-    def record_spec(self):
-        return {**super().record_spec(), "currents": {"through": self.output_shape}}
-
-    def record(self, sim):
-        return {**super().record(sim), "currents": {"through": self.currents(sim)}}

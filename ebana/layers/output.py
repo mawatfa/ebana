@@ -52,8 +52,8 @@ class Differential(Readout):
 class CurrentOutput(Layer):
     """Reads the input nets, and nudges them with current sources (zero in the free phase)."""
 
-    def __init__(self, name, readout=None, save_sim_data=False):
-        super().__init__(name, save_sim_data=save_sim_data)
+    def __init__(self, name, readout=None):
+        super().__init__(name)
         self.readout = readout or Direct()
 
     def build(self, inputs):

@@ -1,9 +1,6 @@
-import pickle
 from abc import ABC, abstractmethod
 
 import numpy as np
-
-CHECKPOINT_VERSION = 2
 
 
 class BaseOptimizer(ABC):
@@ -37,35 +34,20 @@ class BaseOptimizer(ABC):
             p.apply_update(update, self.iterations)
         self.iterations += 1
 
-    # checkpointing <<<
-    def save_state(self, filepath):
-        checkpoint = {
-            "version": CHECKPOINT_VERSION,
+    # state <<<
+    def state_dict(self):
+        return {
             "optimizer": type(self).__name__,
             "iterations": self.iterations,
-            "state": self.state,
-            "parameters": {p.full_name: p.value for p in self.model.parameters()},
+            "slots": {name: {k: v.copy() for k, v in slots.items()} for name, slots in self.state.items()},
         }
-        with open(filepath, "wb") as handle:
-            pickle.dump(checkpoint, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    def load_state(self, filepath):
-        with open(filepath, "rb") as handle:
-            checkpoint = pickle.load(handle)
-
-        if not isinstance(checkpoint, dict) or checkpoint.get("version") != CHECKPOINT_VERSION:
-            raise ValueError(f"{filepath} is not an optimizer checkpoint")
-        if checkpoint["optimizer"] != type(self).__name__:
-            raise ValueError(f"{filepath} was saved by {checkpoint['optimizer']}, not {type(self).__name__}")
-
-        params = {p.full_name: p for p in self.model.parameters()}
-        saved_values = checkpoint["parameters"]
-        if set(saved_values) != set(params):
-            raise ValueError(f"{filepath} has the parameters {sorted(saved_values)}, not {sorted(params)}")
-
-        for name, p in params.items():
-            p.value = np.array(saved_values[name], dtype=float)
-        self.state = checkpoint["state"]
-        self.iterations = checkpoint["iterations"]
-
+    def load_state_dict(self, state):
+        if state["optimizer"] != type(self).__name__:
+            raise ValueError(f"the state was saved by {state['optimizer']}, not {type(self).__name__}")
+        if set(state["slots"]) != set(self.state):
+            raise ValueError(f"the state is for the parameters {sorted(state['slots'])}, not {sorted(self.state)}")
+        self.state = {name: {k: np.array(v, dtype=float) for k, v in slots.items()}
+                      for name, slots in state["slots"].items()}
+        self.iterations = state["iterations"]
     # >>>

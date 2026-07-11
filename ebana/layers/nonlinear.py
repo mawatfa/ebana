@@ -13,8 +13,8 @@ class Diode(Layer):
     """
 
     def __init__(self, name, direction, model=None, bias_voltage=0.0, trainable=False, lr=0.0,
-                 constraint=None, grad_func=None, update_func=None, save_sim_data=False):
-        super().__init__(name, save_sim_data=save_sim_data)
+                 constraint=None, grad_func=None, update_func=None):
+        super().__init__(name)
         if direction not in ("up", "down"):
             raise ValueError(f"direction must be 'up' or 'down', got {direction!r}")
         self.direction = direction
@@ -58,8 +58,8 @@ class Amplifier(Layer):
     """One amplifier stage per net, each driving a new net."""
 
     def __init__(self, name, gain=1.0, device=None, trainable=False, lr=0.0, constraint=None,
-                 grad_func=None, update_func=shared_gain_update, save_sim_data=False):
-        super().__init__(name, save_sim_data=save_sim_data)
+                 grad_func=None, update_func=shared_gain_update):
+        super().__init__(name)
         self.initial_gain = gain
         self.device = device or BidirectionalAmplifier()
         self.options = dict(lr=lr, constraint=constraint, trainable=trainable,

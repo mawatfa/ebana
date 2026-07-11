@@ -7,8 +7,6 @@ class EquilibriumPropagation(LearningAlgorithm):
     the gradient is (dE/dp(nudged) - dE/dp(free)) / beta.
     """
 
-    phases = ("free", "nudge")
-
     def __init__(self, beta):
         if beta == 0:
             raise ValueError("beta must be non-zero")
@@ -38,8 +36,6 @@ class SymmetricEquilibriumPropagation(EquilibriumPropagation):
     (dE/dp(+beta) - dE/dp(-beta)) / (2 beta), which removes the first order
     error of the one-sided estimate.
     """
-
-    phases = ("free", "positive", "negative")
 
     def train_step(self, circuit, targets, loss):
         circuit.solve("free")

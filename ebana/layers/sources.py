@@ -8,10 +8,10 @@ from .base import SourceLayer, net_names
 class Input(SourceLayer):
     """Sources set by the dataset input with the same name. device can also be CurrentSource()."""
 
-    def __init__(self, name, units, device=None, save_sim_data=False):
+    def __init__(self, name, units, device=None):
         self.shape = (units,) if np.isscalar(units) else tuple(units)
         self.device = device or VoltageSource()
-        super().__init__(name, save_sim_data=save_sim_data)
+        super().__init__(name)
 
     def build(self, inputs):
         return net_names(self.shape, f"n_{self.name}")
@@ -29,23 +29,20 @@ class Input(SourceLayer):
     def set_sample(self, sim, data, sample_index):
         self.device.alter(sim, self.sources, np.reshape(data[self.name][sample_index], self.shape))
 
-    def record(self, sim):
-        return {**super().record(sim), "sources": {"measurement": self.device.measure(sim, self.sources)}}
-
-    def record_spec(self):
-        return {**super().record_spec(), "sources": {"measurement": self.shape}}
+    def measure(self, sim):
+        return self.device.measure(sim, self.sources)
 
 
 class Bias(SourceLayer):
     """Fixed sources. Their values are the parameter `value`, which can be trained."""
 
     def __init__(self, name, values, device=None, trainable=False, lr=0.0,
-                 constraint=None, grad_func=None, update_func=None, save_sim_data=False):
+                 constraint=None, grad_func=None, update_func=None):
         self.initial = np.atleast_1d(np.asarray(values, dtype=float))
         self.device = device or VoltageSource()
         self.options = dict(lr=lr, constraint=constraint, trainable=trainable,
                             grad_func=grad_func, update_func=update_func)
-        super().__init__(name, save_sim_data=save_sim_data)
+        super().__init__(name)
 
     def build(self, inputs):
         self.value = self.add_parameter("value", self.initial, self.device, **self.options)
