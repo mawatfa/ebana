@@ -21,7 +21,7 @@ class Diode(Layer):
         self.model = model or IdealDiode()
         self.bias_voltage = bias_voltage
         self.options = dict(lr=lr, constraint=constraint, trainable=trainable,
-                            grad_func=grad_func or self._bias_gradient, update_func=update_func)
+                            grad_func=grad_func, update_func=update_func)
 
     def build(self, inputs):
         (x,) = inputs
@@ -37,16 +37,6 @@ class Diode(Layer):
             self.model.stamp(block, f"d{i}", anode, cathode)
             sources.append(self.bias.device.stamp(block, i, node, GROUND, bias))
         self.bias.elements = block.array(sources, self.bias.shape)
-
-    def _bias_gradient(self, free, nudge):
-        # from the old code, until the source gradient is checked
-        off_current_scale_factor, current_threshold = 1e5, 1e-12
-        conducting = np.abs(free) > current_threshold
-        if self.direction == "up":
-            mask, grad = np.where(free < 0, 1, -off_current_scale_factor), nudge - free
-        else:
-            mask, grad = np.where(free > 0, 1, -off_current_scale_factor), free - nudge
-        return grad * mask * conducting
 
 
 def shared_gain_update(parameter, update, step):

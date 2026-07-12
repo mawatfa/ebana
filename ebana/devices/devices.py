@@ -69,8 +69,8 @@ class Resistor(Device):
         return voltage_across(sim, elements)
 
     def gradient(self, a, b):
-        # dE/dG = V^2 / 2, the factor 2 goes into the learning rate
-        return b**2 - a**2
+        # dE/dG = V^2 / 2
+        return (b**2 - a**2) / 2
 
 
 class VoltageSource(Device):
@@ -81,8 +81,8 @@ class VoltageSource(Device):
         return sim.currents(elements)
 
     def gradient(self, a, b):
-        # TODO: check the sign
-        return b - a
+        # dE/dV = -I, the branch current flows into the + terminal
+        return a - b
 
 
 class CurrentSource(Device):
@@ -93,7 +93,7 @@ class CurrentSource(Device):
         return voltage_across(sim, elements)
 
     def gradient(self, a, b):
-        # TODO: check the sign
+        # dE/dI = V
         return b - a
 
 
@@ -101,6 +101,10 @@ class BidirectionalAmplifier(Device):
     """
     V(out) = shift + gain * (V(in) - shift). The input draws the output
     current divided by the gain, so the nudge also travels backwards.
+
+    Because of that division, the gradients of everything before the
+    amplifier come out scaled by 1/gain^2. The gain itself has no gradient
+    that can be measured locally; train it with a grad_func.
     """
 
     def __init__(self, shift=0.0):
@@ -119,7 +123,7 @@ class BidirectionalAmplifier(Device):
         raise NotImplementedError("the gain is part of the expressions; rebuild the netlist instead")
 
     def gradient(self, a, b):
-        return b - a
+        raise NotImplementedError("the amplifier gain needs a grad_func")
 # >>>
 
 
