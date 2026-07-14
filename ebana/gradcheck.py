@@ -1,7 +1,8 @@
 import numpy as np
 
-from .algorithms.base import SampleCircuit
+from .algorithms import SampleCircuit
 from .simulation import Simulator
+from .training import per_output
 
 
 def _loss(model, sim, inputs, index, targets, loss):
@@ -17,7 +18,7 @@ def gradient_check(model, dataset, loss, algorithm, index=0, parameters=None, el
     times |p|. `elements` picks that many random elements of each parameter.
     Returns {name: {"index", "estimate", "numerical"}}.
     """
-    loss, _ = model._per_output(loss, None)
+    loss, _ = per_output(model, loss)
     targets = {name: v[index] for name, v in dataset.outputs.items()}
     params = [model.parameter(n) for n in parameters] if parameters else model.trainable_parameters()
     rng = np.random.default_rng(seed)

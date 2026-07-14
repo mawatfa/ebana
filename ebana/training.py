@@ -4,13 +4,44 @@ import pickle
 
 import numpy as np
 
-from . import evaluator
 from .callbacks import History
 from .execution import Workers
 
 log = logging.getLogger("ebana")
 
 CHECKPOINT_VERSION = 1
+
+
+# losses and metrics <<<
+def per_output(model, loss, metrics=None):
+    """A loss or metrics given once are used for every output."""
+    names = [layer.name for layer in model.outputs]
+    if not isinstance(loss, dict):
+        loss = {name: loss for name in names}
+    if metrics is None:
+        metrics = []
+    if not isinstance(metrics, dict):
+        metrics = {name: list(metrics) for name in names}
+    for what, value in (("loss", loss), ("metrics", metrics)):
+        if set(value) != set(names):
+            raise KeyError(f"{what} given for {sorted(value)}, the outputs are {sorted(names)}")
+    return loss, metrics
+
+
+def sample_losses(outputs, targets, loss):
+    return {name: np.array([loss[name](y[i], targets[name][i])[0] for i in range(len(y))])
+            for name, y in outputs.items()}
+
+
+def summary(losses, outputs, targets, metrics):
+    """Means over the samples: "loss/<output>", "<metric>/<output>", and "loss", the sum over the outputs."""
+    results = {"loss": float(sum(np.mean(v) for v in losses.values()))}
+    for name, y in outputs.items():
+        results[f"loss/{name}"] = float(np.mean(losses[name]))
+        for metric in metrics[name]:
+            results[f"{metric.name}/{name}"] = float(np.mean(metric(y, targets[name])))
+    return results
+# >>>
 
 
 def _format(logs):
@@ -69,7 +100,7 @@ class Training:
         self.optimizer.step()
 
         logs = {"epoch": self.epoch, "batch": self.batch, "step": self.step}
-        logs |= evaluator.summary(self.samples["loss"], self.samples["output"], batch.outputs, self.metrics)
+        logs |= summary(self.samples["loss"], self.samples["output"], batch.outputs, self.metrics)
         self.history.batches.append(logs)
         log.debug(f"epoch {self.epoch + 1} batch {self.batch + 1}: {_format(logs)}")
         for callback in self.callbacks:
@@ -112,8 +143,7 @@ class Training:
     def validate(self):
         data = self.validation_data
         outputs = self.workers.infer(data.inputs, len(data))
-        return evaluator.summary(evaluator.sample_losses(outputs, data.outputs, self.loss),
-                                 outputs, data.outputs, self.metrics)
+        return summary(sample_losses(outputs, data.outputs, self.loss), outputs, data.outputs, self.metrics)
     # >>>
 
     # checkpoints <<<

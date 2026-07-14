@@ -12,10 +12,10 @@ class LearningRateSchedule(ABC):
 
 
 def as_schedule(lr):
-    return lr if isinstance(lr, LearningRateSchedule) else Constant(lr)
+    return lr if isinstance(lr, LearningRateSchedule) else _Constant(lr)
 
 
-class Constant(LearningRateSchedule):
+class _Constant(LearningRateSchedule):
     def __init__(self, learning_rate):
         self.learning_rate = float(learning_rate)
 

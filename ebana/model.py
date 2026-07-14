@@ -1,12 +1,9 @@
 import numpy as np
 
-from . import evaluator
-from .callbacks import History
-from .dataset_handler import Dataset, DataLoader
 from .execution import Workers
 from .layers import Input
 from .simulation import Netlist
-from .training import Training
+from .training import Training, per_output, sample_losses, summary
 
 
 def _connected_layers(outputs):
@@ -86,20 +83,6 @@ class Model:
                 if dataset.output_sizes[layer.name] != layer.units:
                     raise ValueError(f"output '{layer.name}' has {layer.units} units, the dataset has {dataset.output_sizes[layer.name]}")
 
-    def _per_output(self, loss, metrics):
-        """A loss or metrics given once are used for every output."""
-        names = [layer.name for layer in self.outputs]
-        if not isinstance(loss, dict):
-            loss = {name: loss for name in names}
-        if metrics is None:
-            metrics = []
-        if not isinstance(metrics, dict):
-            metrics = {name: list(metrics) for name in names}
-        for what, value in (("loss", loss), ("metrics", metrics)):
-            if set(value) != set(names):
-                raise KeyError(f"{what} given for {sorted(value)}, the outputs are {sorted(names)}")
-        return loss, metrics
-
     # netlist <<<
     def build_netlist(self, inputs, sample_index=0):
         netlist = Netlist(temperature=self.temperature)
@@ -125,7 +108,7 @@ class Model:
         self.check_dataset(train_data.dataset)
         if validation_data is not None:
             self.check_dataset(validation_data)
-        loss, metrics = self._per_output(loss, metrics)
+        loss, metrics = per_output(self, loss, metrics)
         training = Training(
             self, train_data=train_data, epochs=epochs, optimizer=optimizer, loss=loss, metrics=metrics,
             algorithm=algorithm, validation_data=validation_data, validation_freq=validation_freq,
@@ -141,7 +124,7 @@ class Model:
 
     def evaluate(self, dataset, loss, metrics=None, algorithm=None, workers=1):
         self.check_dataset(dataset)
-        loss, metrics = self._per_output(loss, metrics)
+        loss, metrics = per_output(self, loss, metrics)
         outputs = self.predict(dataset, algorithm, workers)
-        return evaluator.summary(evaluator.sample_losses(outputs, dataset.outputs, loss), outputs, dataset.outputs, metrics)
+        return summary(sample_losses(outputs, dataset.outputs, loss), outputs, dataset.outputs, metrics)
     # >>>

@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ..simulation import GROUND, Element
+from .simulation import GROUND, Element
 
 
 # measurements <<<

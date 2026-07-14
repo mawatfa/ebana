@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from .algorithms.base import SampleCircuit, free_outputs
+from .algorithms import SampleCircuit, free_outputs
 from .simulation import Simulator
 
 _job = None
