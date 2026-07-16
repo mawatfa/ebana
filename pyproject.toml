@@ -14,6 +14,10 @@ dependencies = [
     "pycircuitsim @ git+https://github.com/medwatt/PyCircuitSim.git",
 ]
 
+[project.optional-dependencies]
+examples = ["scikit-learn", "optuna"]
+dev = ["pytest"]
+
 [project.urls]
 Repository = "https://github.com/mawatfa/ebana"
 

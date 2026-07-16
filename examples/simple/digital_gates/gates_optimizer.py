@@ -1,54 +1,37 @@
+"""
+Tune gates.py with optuna: each trial trains with the suggested settings
+(on top of ARGS in gates.py) and is scored by the mean validation loss of
+its last 3 epochs.
+"""
+
+# imports <<<
+import numpy as np
 import optuna
+
 from gates import train
+# >>>
 
-# Define the objective function for Optuna
+# search space <<<
+def settings(trial):
+    return {
+        "beta": trial.suggest_float("beta", 1e-12, 1e-9, log=True),
+        "lr_hidden": trial.suggest_float("lr_hidden", 1e-10, 1e-8, log=True),
+        "lr_or": trial.suggest_float("lr_or", 1e-11, 1e-9, log=True),
+        "lr_and": trial.suggest_float("lr_and", 1e-11, 1e-9, log=True),
+        "lr_xor": trial.suggest_float("lr_xor", 1e-11, 1e-9, log=True),
+    }
+# >>>
+
+# objective <<<
 def objective(trial):
-    # Hyperparameters to tune
-    config = {
-        "beta": trial.suggest_float("beta", 1e-11, 1e-7, log=True),
-        "lr1": trial.suggest_float("lr1", 1e-11, 1e-7, log=True),
-        "lr2or": trial.suggest_float("lr2or", 1e-11, 1e-7, log=True),
-        "lr2and": trial.suggest_float("lr2and", 1e-11, 1e-7, log=True),
-        "lr2xor": trial.suggest_float("lr2xor", 1e-11, 1e-7, log=True),
-    }
+    history = train({**settings(trial), "epochs": 20, "save": False, "verbose": False})
+    loss = np.nanmean(history.epoch_values("val_loss")[-3:])
+    return loss if np.isfinite(loss) else float("inf")     # the run diverged
+# >>>
 
-    # Base configuration
-    base_config = {
-        "evaluate_only": False,
-        "write_netlist": False,
-        "n_processes_train": 4,
-        "n_processes_test": 4,
-        "beta": 1e-7,
-        "lr1": 4e-8,
-        "lr2or": 4e-9,
-        "lr2and": 4e-9,
-        "lr2xor": 4e-9,
-        "layer_1_trainable": True,
-        "layer_2_trainable": True,
-        "optimizer": "sgd",
-        "loss": "mse",
-        "num_epoch": 20,
-        "validate_every_epoch": 1,
-        "save_state": False,
-        "load_state": False,
-        "verbose": False,
-    }
 
-    # Merge base_config with trial configuration
-    base_config.update(config)
-
-    accuracy, loss = train(base_config)
-
-    loss_or = loss["or"][-3:-1]
-    loss_and = loss["and"][-3:-1]
-    loss_xor = loss["xor"][-3:-1]
-
-    return loss_or.sum() + loss_and.sum() + loss_xor.sum()
-
-# Create and optimize the study
-study = optuna.create_study(direction="minimize")
-
-study.optimize(objective, n_trials=40, n_jobs=10)
-
-# Output the best parameters
-print("Best hyperparameters:", study.best_params)
+if __name__ == "__main__":
+    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=0))
+    study.optimize(objective, n_trials=40)
+    print("best settings:", study.best_params)
+    print("best loss:", study.best_value)

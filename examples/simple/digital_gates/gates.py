@@ -1,287 +1,236 @@
-# imports <<<
-import sys
-import os
-from itertools import product
+"""
+Digital gates: one circuit learns OR, AND and XOR of two bits at once.
 
-# Add the parent directory to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
+    xp, xn, 1 V -> d1 (10) -> diode clamps -> amp -> 1 V -> d_or  -> "or"
+                                                         -> d_and -> "and"
+                                                         -> d_xor -> "xor"
+
+Conductances are positive, so every input is applied with both polarities
+(xp = x, xn = -x), and every output is the difference of two nets. Each
+output has its own crossbar and learning rate.
+
+    python gates.py             train with ARGS below (see "mode" for the other runs)
+    python gates_test.py        train a list of configurations, one log file each
+    python gates_optimizer.py   tune beta and the learning rates with optuna
+"""
+
+# imports <<<
+import logging
+from itertools import product
+from pathlib import Path
 
 import numpy as np
 
-import src.optimizers as optimizers
-import src.losses as losses
-from src.analognn import Model
-from src.initializers import Initializers
-from src.dataset_handler import DataSet, BatchGenerator
-from src.metrics import Metrics
-
-from src.analog_layers import (
-    DCVoltageLayer,
-    DenseLayer,
-    DiodeLayer,
-    AmplificationLayer,
-    CurrentNudgingLayer,
-    ConcatenateLayer,
-)
+from ebana import Dataset, DataLoader, Model, gradient_check
+from ebana import optimizers
+from ebana.algorithms import EquilibriumPropagation, SymmetricEquilibriumPropagation
+from ebana.callbacks import EarlyStopping, Recorder
+from ebana.constraints import Clip, MaxRelativeChange
+from ebana.devices import BidirectionalAmplifier, IdealDiode
+from ebana.initializers import GlorotUniform
+from ebana.layers import Amplifier, Bias, Concatenate, CurrentOutput, Dense, Differential, Diode, Input
+from ebana.losses import MSE
+from ebana.metrics import BinaryAccuracy
+from ebana.probes import Measurement, Voltages
+from ebana.schedules import CosineDecay
 # >>>
 
-# default arguments <<<
+log = logging.getLogger("gates")
+
+GATES = {"or": [0, 1, 1, 1], "and": [0, 0, 0, 1], "xor": [0, 1, 1, 0]}
+
+# settings <<<
 ARGS = {
-    "index": -1,
-    "evaluate_only": False,
-    "write_netlist": False,
-    "n_processes_train": 4,
-    "n_processes_test": 4,
-    "beta": 2.73e-11,
-    "lr1": 5.18e-10,
-    "lr2or": 4.54e-11,
-    "lr2and": 2.32e-11,
-    "lr2xor": 2.38e-11,
-    "layer_1_trainable": True,
-    "layer_2_trainable": True,
-    "optimizer": "sgd",
-    "loss": "mse",
-    "num_epoch": 10,
-    "validate_every_epoch": 1,
-    "save_state": True,
-    "load_state": False,
-    "optimizer_path": "",
+    # run
+    "mode": "train",            # "train", "evaluate" (saved parameters), "netlist" or "gradcheck"
+    "name": None,               # name of the run's files in runs/ (None: built from the settings)
+    "workers": 4,               # processes simulating samples in parallel
+    "seed": 111,
+    "save": True,               # checkpoint during training, save history and parameters
+    "resume": False,            # continue from the run's checkpoint, if there is one
     "verbose": True,
+    # data
+    "bit_voltage": 2.0,         # bits 0 and 1 are -2 V and +2 V
+    # circuit
+    "hidden_units": 10,
+    "g_range": (1e-7, 1e-5),    # conductance window of the crossbars (S)
+    "diode_vth": 0.3,           # the clamps conduct beyond +-0.3 V
+    "gain": 4,
+    # training
+    "epochs": 10,
+    "batch_size": 4,
+    "algorithm": "ep",          # "ep" or "symmetric_ep"
+    "beta": 2.73e-11,           # nudge strength (S)
+    "optimizer": "sgd",         # "sgd", "momentum" or "adam"
+    "lr_hidden": 1.036e-9,
+    "lr_or": 9.08e-11,
+    "lr_and": 4.64e-11,
+    "lr_xor": 4.76e-11,
+    "lr_schedule": "constant",  # "constant" or "cosine" (decays to 10% over the run)
+    "update_rule": "device",    # "device" (its own gradient), "power" or "product" (see below)
+    "update_exponent": 2.8,     # p of the "power" rule
+    "clip_norm": None,          # clip each gradient to this L2 norm
+    "patience": None,           # stop after this many epochs without a better validation loss
+    "record_every": None,       # record hidden voltages and weight drops every n batches
 }
 # >>>
 
-# update args from user dict <<<
-def update_args_from_user_dict(arg_dict):
-    ARGS.update(arg_dict)
+# data <<<
+def datasets(args):
+    """Train and validation data: the four input pairs, with each gate's truth table as its output."""
+    x = args["bit_voltage"] * np.array(list(product([-1, 1], repeat=2)))
+    data = Dataset(
+        inputs={"xp": x, "xn": -x},
+        outputs={gate: np.array(y).reshape(-1, 1) for gate, y in GATES.items()},
+    )
+    return data, data
 # >>>
 
-# generate save name <<<
-def generate_save_name(args):
-    index_string = f"{args['index']}" if args['index'] > -1 else ""
+# options <<<
+class PowerRule:
+    """For a device that responds to its voltage like |V|^p. p = 2 is the normal EP rule."""
 
-    parameters = [
-        index_string,
-        "gates",
-        args['optimizer'],
-        args['loss'],
-        f"{args['beta']:.1e}",
-        f"{args['lr1']:.1e}",
-        f"{args['lr2or']:.1e}"
-        f"{args['lr2and']:.1e}"
-        f"{args['lr2xor']:.1e}"
-    ]
-    save_name = "_".join(parameters)
-    return save_name
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, a, b):
+        return (np.abs(b)**self.p - np.abs(a)**self.p) / self.p
+
+
+class ProductRule:
+    """The EP rule linearized around the first state: one multiplication per device."""
+
+    def __call__(self, a, b):
+        return a * (b - a)
+
+
+def update_rule(args):
+    return {"device": None, "power": PowerRule(args["update_exponent"]), "product": ProductRule()}[args["update_rule"]]
+
+
+def learning_rate(args, lr, steps):
+    if args["lr_schedule"] == "cosine":
+        return CosineDecay(lr, decay_steps=steps, alpha=0.1)
+    return lr
+
+
+def algorithm(args):
+    kind = {"ep": EquilibriumPropagation, "symmetric_ep": SymmetricEquilibriumPropagation}[args["algorithm"]]
+    return kind(args["beta"])
+
+
+def optimizer(args, model):
+    transforms = [optimizers.ClipByNorm(args["clip_norm"])] if args["clip_norm"] else []
+    if args["optimizer"] == "adam":
+        return optimizers.Adam(model, transforms=transforms)
+    if args["optimizer"] == "momentum":
+        return optimizers.SGDMomentum(model, momentum=0.9, transforms=transforms)
+    return optimizers.SGD(model, transforms=transforms)
+
+
+def callbacks(args):
+    chosen = []
+    if args["patience"]:
+        chosen.append(EarlyStopping("val_loss", patience=args["patience"], restore_best=True))
+    if args["record_every"]:
+        probes = {"hidden": Voltages("amp"), "drops": Measurement("d1/weight")}
+        chosen.append(Recorder(probes, every=args["record_every"], outputs=True, forces=True))
+    return chosen
 # >>>
 
-# generate_datasets <<<
-def generate_voltage_values(values=[0, 1], count=3):
-    positive = list(product(values, repeat=count))
-    voltages = [list(positive[i]) for i in range(2**count)]
-    return voltages
+# model <<<
+def build_model(args, steps):
+    g_min, g_max = args["g_range"]
+    init = GlorotUniform(low=g_min, high=g_max, seed=args["seed"])
+    window = [MaxRelativeChange(0.5), Clip(g_min, g_max)]
+    diode = IdealDiode(vth=args["diode_vth"], ron=1.0, roff=1e20)
+    rule = update_rule(args)
 
-def make_digital_gates_dataset(bit_0_voltage, bit_1_voltage, count=2):
-    X = np.array(generate_voltage_values(values=[bit_0_voltage, bit_1_voltage], count=count))
-    OR = np.array([[0],[1],[1],[1]])
-    AND = np.array([[0],[0],[0],[1]])
-    XOR = np.array([[0],[1],[1],[0]])
-    return X, [OR, AND, XOR]
+    def crossbar(name, units, lr):
+        return Dense(name, units, initializer=init, constraint=window, grad_func=rule,
+                     lr=learning_rate(args, lr, steps))
+
+    # hidden layer: the inputs and a 1 V bias row through a crossbar, clamped by
+    # two diodes (to 0 V, conducting beyond +-vth), then amplified
+    rows1 = Concatenate("rows1")([Input("xp", 2), Input("xn", 2), Bias("bias1", [1.0])])
+    h = crossbar("d1", args["hidden_units"], args["lr_hidden"])(rows1)
+    h = Diode("clamp_hi", "down", model=diode)(h)
+    h = Diode("clamp_lo", "up", model=diode)(h)
+    h = Amplifier("amp", gain=args["gain"], device=BidirectionalAmplifier(shift=0.0))(h)
+
+    # one output crossbar per gate, all fed by the hidden layer and a bias row
+    rows2 = Concatenate("rows2")([h, Bias("bias2", [1.0])])
+    outputs = [CurrentOutput(gate, readout=Differential())(crossbar(f"d_{gate}", 2, args[f"lr_{gate}"])(rows2))
+               for gate in GATES]
+    return Model(outputs=outputs)
 # >>>
 
-def train(arg_dict):
+# running <<<
+def run_file(args, suffix):
+    name = args["name"] or "_".join([
+        "gates", args["algorithm"], args["optimizer"], args["update_rule"],
+        f"beta{args['beta']:.2e}", f"lr{args['lr_hidden']:.2e}",
+    ])
+    Path("runs").mkdir(exist_ok=True)
+    return Path("runs") / f"{name}{suffix}"
 
-    update_args_from_user_dict(arg_dict)
-    save_name = generate_save_name(ARGS)
 
-    # setup: input/output <<<
+def check_gradients(model, data, loss, args):
+    """Should be 1, or 1/gain^2 before the amplifier."""
+    results = gradient_check(model, data, loss, algorithm(args), elements=5, seed=args["seed"])
+    for name, r in results.items():
+        e, n = r["estimate"], r["numerical"]
+        ok = np.abs(n) > 1e-9 * np.abs(n).max() if np.any(n) else np.zeros(len(n), bool)
+        log.info(f"{name}: estimate / finite difference = {np.median(e[ok] / n[ok]) if ok.any() else np.nan:.4g}")
+    return results
 
-    # shift output levels
-    output_shift = 0
-    output_midpoint = 0.5
 
-    # inputs to the model
-    X, Y = make_digital_gates_dataset(-2, 2)
+def train(config=None):
+    """Runs the example with ARGS updated by config."""
+    args = {**ARGS, **(config or {})}
+    logging.getLogger("ebana").setLevel(logging.INFO if args["verbose"] else logging.WARNING)
 
-    # construct dataset
-    train_dataset = DataSet(
-            inputs = {'xp':X, 'xn':-X},
-            outputs = {'or': Y[0], 'and': Y[1], 'xor': Y[2]}
-    )
+    train_data, val_data = datasets(args)
+    loader = DataLoader(train_data, args["batch_size"], shuffle=True, seed=args["seed"])
+    model = build_model(args, steps=args["epochs"] * len(loader))
+    loss, metrics = MSE(), [BinaryAccuracy(0.5)]
 
-    test_dataset = DataSet(
-            inputs = {'xp':X, 'xn':-X},
-            outputs = {'or': Y[0], 'and': Y[1], 'xor': Y[2]}
-    )
-
-    # dataloader for training in batches
-    train_dataloader = BatchGenerator(train_dataset, 4)
-    test_dataloader = BatchGenerator(test_dataset, 4, shuffle=True)
-
-    # >>>
-
-    # setup: model parameters <<<
-
-    # layer shapes
-    input_units = X.shape[-1]
-    hidden_1_units = 10
-    hidden_2_units = 10
-    output_units_1 = Y[0].shape[-1]
-    output_units_2 = Y[1].shape[-1]
-    output_units_3 = Y[2].shape[-1]
-
-    # >>>
-
-    # setup: circuit parameters <<<
-
-    ###################
-    #  bias voltages  #
-    ###################
-    bias_p = np.array([0]) + 1
-    bias_n = np.array([0]) - 1
-
-    # bias voltages of nonlinearity layers
-    diode_bias_down = 0
-    diode_bias_up = 0
-
-    ############
-    #  weight  #
-    ############
-    weight_initialzier = Initializers(
-            init_type="glorot_uniform",
-            params = {
-                "init_low": 1e-7,
-                "init_high": 1e-5,
-                "clip_low": 1e-7,
-                "clip_high": 1e-5,
-                }
-            )
-
-    ##################
-    #  nonlinearity  #
-    ##################
-    behaviorial_diode_param = {"VTH": 0.3, "RON": 1.0, "ROFF": 1e20}
-
-    ###############
-    #  amplifier  #
-    ###############
-    amp_param = {"shift": 0, "gain": 4}
-
-    # >>>
-
-    # setup: training parameters <<<
-    beta = ARGS['beta']
-    lr1 = ARGS['lr1']
-    lr2or = ARGS['lr2or']
-    lr2and = ARGS['lr2and']
-    lr2xor = ARGS['lr2xor']
-    # >>>
-
-    # loss function setup <<<
-    if ARGS['loss'] == "crossentropy":
-        activation = "softmax"
-        loss_fn = losses.CrossEntropyLoss(beta=beta)
-    else:
-        activation = ""
-        loss_fn = losses.MSE(beta=beta, output_midpoint=output_midpoint)
-    # >>>
-
-    # build model <<<
-
-    # input layer
-    xp  = DCVoltageLayer(units=input_units, name='xp')
-    xn = DCVoltageLayer(units=input_units, name='xn')
-    b1_p = DCVoltageLayer(units=1, name="b1_p", input_voltages=bias_p)
-    j1 = ConcatenateLayer(name='j1')([xp, xn, b1_p])
-
-    # hidden dense layer 1
-    d1 = DenseLayer(units=hidden_1_units, lr=lr1, name='d1', initializer=weight_initialzier, trainable=True)(j1)
-    a1_1 = DiodeLayer(name="act1_1", direction="down", bias_voltage=diode_bias_down, kind="behavioral", param=behaviorial_diode_param, lr=0.0, trainable=False)(d1)
-    a1_2 = DiodeLayer( name="act1_2", direction="up", bias_voltage=diode_bias_up, kind="behavioral", param=behaviorial_diode_param, lr=0.0, trainable=False)(a1_1)
-    g1 = AmplificationLayer(name='amp1', param=amp_param)(a1_2)
-
-    # layer before output
-    b2_p = DCVoltageLayer(units=1, name='b2_p', input_voltages=bias_p)
-    j2 = ConcatenateLayer(name='j2')([g1, b2_p])
-
-    # output dense layer 1
-    d_out1 = DenseLayer(units=2 * output_units_1, lr=lr2or, name='d_out1', initializer=weight_initialzier, trainable=True)(j2)
-    c_out1 = CurrentNudgingLayer(name='or', fold=True, activation=activation)(d_out1)
-
-    # output dense layer 2
-    d_out2 = DenseLayer(units=2 * output_units_2, lr=lr2and, name='d_out2', initializer=weight_initialzier, trainable=True)(j2)
-    c_out2 = CurrentNudgingLayer(name='and', fold=True, activation=activation)(d_out2)
-
-    # output dense layer 3
-    d_out3 = DenseLayer(units=2 * output_units_3, lr=lr2xor, name='d_out3', initializer=weight_initialzier, trainable=True)(j2)
-    c_out3 = CurrentNudgingLayer(name='xor', fold=True, activation=activation)(d_out3)
-
-    # specify model
-    model = Model(
-            inputs=[xp, xn, b1_p, b2_p],
-            outputs=[c_out1, c_out2, c_out3],
-            n_processes_train = ARGS['n_processes_train'],
-            n_processes_test = ARGS['n_processes_test']
-            )
-    # >>>
-
-    # training setup <<<
-
-    # optimizer setup <<<
-    if ARGS["optimizer"] == "adam":
-        optimizer = optimizers.Adam(model, beta=beta)
-    else:
-        optimizer = optimizers.SGD(model, beta=beta) # don't forget to lower lr and beta for SGD
-
-    if ARGS["load_state"]:
-        if ARGS["optimizer_path"] != "":
-            optimizer.load_state(f"{ARGS['optimizer_path']}")
-            print("Done Loading State: ", ARGS["optimizer_path"])
-        else:
-            optimizer.load_state(f"{save_name}_optimizer.pickle")
-            print("Done Loading State: ", f"{save_name}_optimizer.pickle")
-    # >>>
-
-    metrics = Metrics(
-        model,
-        verbose=ARGS["verbose"],
-        save_phase_data=False,
-        save_batch_data=False,
-        save_injected_currents=False,
-        validate_every={"epoch_num": ARGS["validate_every_epoch"]},
-    )
-
-    # >>>
-
-    # train <<<
-    num_epochs = ARGS["num_epoch"]
-
-    if ARGS["write_netlist"]:
-        model.write_netlist(train_dataloader, "cct.sp")
-        exit()
-
-    if ARGS["evaluate_only"]:
-        results = model.evaluate(train_dataset, loss_fn=loss_fn)
-        # predictions = model.predict(train_dataset, loss_fn=loss_fn)
+    if args["mode"] == "netlist":
+        model.write_netlist(train_data, run_file(args, ".sp"))
+        return run_file(args, ".sp")
+    if args["mode"] == "gradcheck":
+        return check_gradients(model, train_data, loss, args)
+    if args["mode"] == "evaluate":
+        model.load_parameters(run_file(args, "_parameters.npz"))
+        results = model.evaluate(val_data, loss, metrics, workers=args["workers"])
+        log.info("  ".join(f"{k} {v:.4g}" for k, v in results.items()))
         return results
 
-    model.fit(
-        train_dataloader=train_dataloader,
-        epochs=num_epochs,
-        loss_fn=loss_fn,
-        optimizer=optimizer,
-        test_dataloader=test_dataloader,
+    checkpoint = run_file(args, ".ckpt")
+    run_callbacks = callbacks(args)
+    history = model.fit(
+        train_data=loader,
+        validation_data=val_data,
+        epochs=args["epochs"],
+        optimizer=optimizer(args, model),
+        algorithm=algorithm(args),
+        loss=loss,
         metrics=metrics,
+        callbacks=run_callbacks,
+        checkpoint=checkpoint if args["save"] else None,
+        resume=checkpoint if args["resume"] and checkpoint.exists() else None,
+        workers=args["workers"],
     )
+    if args["save"]:
+        history.save(run_file(args, "_history.npz"))
+        model.save_parameters(run_file(args, "_parameters.npz"))
+        for callback in run_callbacks:
+            if isinstance(callback, Recorder):
+                callback.save(run_file(args, "_recorded.npz"))
+    return history
+# >>>
 
-    if ARGS["save_state"]:
-        optimizer.save_state(save_name + "_optimizer.pickle")
-        model.save_history(save_name + "_history.pickle")
-
-
-    return model.accumulator.get_test_accuracy(), model.accumulator.get_training_loss()
-
-    # >>>
 
 if __name__ == "__main__":
-    result = train(ARGS)
-    # print(result)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    train()
