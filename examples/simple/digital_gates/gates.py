@@ -152,16 +152,22 @@ def build_model(args, steps):
 
     # hidden layer: the inputs and a 1 V bias row through a crossbar, clamped by
     # two diodes (to 0 V, conducting beyond +-vth), then amplified
-    rows1 = Concatenate("rows1")([Input("xp", 2), Input("xn", 2), Bias("bias1", [1.0])])
-    h = crossbar("d1", args["hidden_units"], args["lr_hidden"])(rows1)
-    h = Diode("clamp_hi", "down", model=diode)(h)
-    h = Diode("clamp_lo", "up", model=diode)(h)
-    h = Amplifier("amp", gain=args["gain"], device=BidirectionalAmplifier(shift=0.0))(h)
+    xp = Input("xp", 2)
+    xn = Input("xn", 2)
+    bias1 = Bias("bias1", [1.0])
+    rows1 = Concatenate("rows1")([xp, xn, bias1])
+    d1 = crossbar("d1", args["hidden_units"], args["lr_hidden"])(rows1)
+    clamp_hi = Diode("clamp_hi", "down", model=diode)(d1)
+    clamp_lo = Diode("clamp_lo", "up", model=diode)(clamp_hi)
+    amp = Amplifier("amp", gain=args["gain"], device=BidirectionalAmplifier(vcm=0.0))(clamp_lo)
 
     # one output crossbar per gate, all fed by the hidden layer and a bias row
-    rows2 = Concatenate("rows2")([h, Bias("bias2", [1.0])])
-    outputs = [CurrentOutput(gate, readout=Differential())(crossbar(f"d_{gate}", 2, args[f"lr_{gate}"])(rows2))
-               for gate in GATES]
+    bias2 = Bias("bias2", [1.0])
+    rows2 = Concatenate("rows2")([amp, bias2])
+    outputs = []
+    for gate in GATES:
+        d_gate = crossbar(f"d_{gate}", 2, args[f"lr_{gate}"])(rows2)
+        outputs.append(CurrentOutput(gate, readout=Differential())(d_gate))
     return Model(outputs=outputs)
 # >>>
 

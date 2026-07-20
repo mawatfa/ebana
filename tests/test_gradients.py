@@ -13,13 +13,17 @@ DATA = Dataset({"x": np.array([[0.9, -0.9, 0.5]])}, {"out": np.array([[0.2, -0.1
 
 
 def build(gain=1.0, up=0.0, down=0.0, diode=IdealDiode(vth=0.1, ron=10)):
-    rows = Concatenate("rows")([Input("x", 3), Bias("v", [0.7]), Bias("i", [2e-4], device=CurrentSource())])
+    x = Input("x", 3)
+    v = Bias("v", [0.7])
+    i = Bias("i", [2e-4], device=CurrentSource())
+    rows = Concatenate("rows")([x, v, i])
     h = Dense("h", 4, initializer=RandomUniform(1e-4, 1e-3, seed=1), device=Resistor(decimals=None))(rows)
-    h = Diode("down", "down", model=diode, bias_voltage=down)(h)
-    h = Diode("up", "up", model=diode, bias_voltage=up)(h)
-    h = Amplifier("amp", gain=gain)(h)
-    o = Dense("o", 2, initializer=RandomUniform(1e-4, 1e-3, seed=2), device=Resistor(decimals=None))(h)
-    return Model(outputs=[CurrentOutput("out")(o)])
+    clamp_down = Diode("down", "down", model=diode, bias_voltage=down)(h)
+    clamp_up = Diode("up", "up", model=diode, bias_voltage=up)(clamp_down)
+    amp = Amplifier("amp", gain=gain)(clamp_up)
+    o = Dense("o", 2, initializer=RandomUniform(1e-4, 1e-3, seed=2), device=Resistor(decimals=None))(amp)
+    out = CurrentOutput("out")(o)
+    return Model(outputs=[out])
 
 
 def ratios(model):
@@ -52,7 +56,8 @@ def test_one_sided_ep_converges():
     x = Input("x", 2)
     d = Dense("d", 1, initializer=Constant(1e-3), device=Resistor(decimals=None))(x)
     d.weight.value[:] = [[1e-3], [3e-3]]
-    model = Model(outputs=[CurrentOutput("out")(d)])
+    out = CurrentOutput("out")(d)
+    model = Model(outputs=[out])
     data = Dataset({"x": np.array([[1.0, -0.5]])}, {"out": np.array([[0.2]])})
     for beta, rtol in [(1e-4, 3e-2), (1e-6, 3e-4)]:
         r = gradient_check(model, data, MSE(), EquilibriumPropagation(beta), step=1e-5)["d/weight"]

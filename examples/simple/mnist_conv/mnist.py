@@ -153,21 +153,26 @@ def build_model(args, steps):
     k, s = args["kernel_size"], args["stride"]
 
     # both polarities of the image, stacked as channels: (28, 28, 2)
-    image = Stack("image", axis=-1)([Reshape("xp_2d", (28, 28))(Input("xp", 784)),
-                                     Reshape("xn_2d", (28, 28))(Input("xn", 784))])
+    xp = Input("xp", 784)
+    xn = Input("xn", 784)
+    xp_2d = Reshape("xp_2d", (28, 28))(xp)
+    xn_2d = Reshape("xn_2d", (28, 28))(xn)
+    image = Stack("image", axis=-1)([xp_2d, xn_2d])
 
     # hidden layer: one crossbar per output pixel over its patch, clamped, amplified
-    h = LocallyConnected2D("d1", kernel_size=(k, k), stride=(s, s), filters=args["filters"],
-                           padding=args["padding"], initializer=init, constraint=window, grad_func=rule,
-                           lr=learning_rate(args, args["lr_hidden"], steps))(image)
-    h = Diode("clamp_hi", "down", model=diode, bias_voltage=args["clamp_hi"])(h)
-    h = Diode("clamp_lo", "up", model=diode, bias_voltage=args["clamp_lo"])(h)
-    h = Amplifier("amp", gain=args["gain"], device=BidirectionalAmplifier(shift=0.0))(h)
+    d1 = LocallyConnected2D("d1", kernel_size=(k, k), stride=(s, s), filters=args["filters"],
+                            padding=args["padding"], initializer=init, constraint=window, grad_func=rule,
+                            lr=learning_rate(args, args["lr_hidden"], steps))(image)
+    clamp_hi = Diode("clamp_hi", "down", model=diode, bias_voltage=args["clamp_hi"])(d1)
+    clamp_lo = Diode("clamp_lo", "up", model=diode, bias_voltage=args["clamp_lo"])(clamp_hi)
+    amp = Amplifier("amp", gain=args["gain"], device=BidirectionalAmplifier(vcm=0.0))(clamp_lo)
 
     # output layer: two nets per class, read as their difference
+    flat = Reshape("flat", (-1,))(amp)
     d2 = Dense("d2", 2 * 10, initializer=init, constraint=window, grad_func=rule,
-               lr=learning_rate(args, args["lr_out"], steps))(Reshape("flat", (-1,))(h))
-    return Model(outputs=[CurrentOutput("out", readout=Differential())(d2)])
+               lr=learning_rate(args, args["lr_out"], steps))(flat)
+    out = CurrentOutput("out", readout=Differential())(d2)
+    return Model(outputs=[out])
 # >>>
 
 # running <<<

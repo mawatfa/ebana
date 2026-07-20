@@ -30,14 +30,20 @@ def build_model():
     window = [MaxRelativeChange(0.5), Clip(1e-7, 1e-5)]
     diode = IdealDiode(vth=0.15, ron=1.0, roff=1e20)
 
-    image = Stack("j1", axis=-1)([Reshape("rxp", (6, 6))(Input("xp", 36)), Reshape("rxn", (6, 6))(Input("xn", 36))])
-    h = LocallyConnected2D("d1", kernel_size=(3, 3), stride=(3, 3), filters=2, initializer=init, constraint=window,
-                           lr=CosineDecay(LR, decay_steps=20, alpha=0.1))(image)
-    h = Diode("down", direction="down", model=diode, bias_voltage=0.5)(h)
-    h = Diode("up", direction="up", model=diode, bias_voltage=-0.1)(h)
-    h = Amplifier("amp", gain=10, device=BidirectionalAmplifier(shift=0.0))(h)
-    out = Dense("d_out", 4, lr=LR, initializer=init, constraint=window)(Reshape("r2", (-1,))(h))
-    return Model(outputs=[CurrentOutput("c1", readout=Differential())(out)])
+    xp = Input("xp", 36)
+    xn = Input("xn", 36)
+    rxp = Reshape("rxp", (6, 6))(xp)
+    rxn = Reshape("rxn", (6, 6))(xn)
+    image = Stack("j1", axis=-1)([rxp, rxn])
+    d1 = LocallyConnected2D("d1", kernel_size=(3, 3), stride=(3, 3), filters=2, initializer=init, constraint=window,
+                            lr=CosineDecay(LR, decay_steps=20, alpha=0.1))(image)
+    down = Diode("down", direction="down", model=diode, bias_voltage=0.5)(d1)
+    up = Diode("up", direction="up", model=diode, bias_voltage=-0.1)(down)
+    amp = Amplifier("amp", gain=10, device=BidirectionalAmplifier(vcm=0.0))(up)
+    flat = Reshape("r2", (-1,))(amp)
+    d_out = Dense("d_out", 4, lr=LR, initializer=init, constraint=window)(flat)
+    out = CurrentOutput("c1", readout=Differential())(d_out)
+    return Model(outputs=[out])
 
 
 def test_learns_the_images():

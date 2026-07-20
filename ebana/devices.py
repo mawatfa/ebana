@@ -99,7 +99,7 @@ class CurrentSource(Device):
 
 class BidirectionalAmplifier(Device):
     """
-    V(out) = shift + gain * (V(in) - shift). The input draws the output
+    V(out) = vcm + gain * (V(in) - vcm). The input draws the output
     current divided by the gain, so the nudge also travels backwards.
 
     Because of that division, the gradients of everything before the
@@ -107,11 +107,11 @@ class BidirectionalAmplifier(Device):
     that can be measured locally; train it with a grad_func.
     """
 
-    def __init__(self, shift=0.0):
-        self.shift = shift
+    def __init__(self, vcm=0.0):
+        self.vcm = vcm
 
     def stamp(self, block, id, a, b, value):
-        stage = block.behavioral_voltage(id, b, GROUND, f"{{{self.shift} + {value} * (V({a}) - {self.shift})}}")
+        stage = block.behavioral_voltage(id, b, GROUND, f"{{{self.vcm} + {value} * (V({a}) - {self.vcm})}}")
         block.behavioral_current(f"i{id}", a, GROUND, f"{{{-1 / value} * I({stage.name})}}")
         return Element(name=stage.name, kind=stage.kind, nodes=(a, b), branch=True)
 

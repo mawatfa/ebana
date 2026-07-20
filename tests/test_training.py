@@ -25,15 +25,20 @@ def build_model():
     diode = IdealDiode(vth=0.3, ron=1.0, roff=1e20)
     lr = {"d1": 1.036e-9, "or": 9.08e-11, "and": 4.64e-11, "xor": 4.76e-11}
 
-    j1 = Concatenate("j1")([Input("xp", 2), Input("xn", 2), Bias("b1", [1.0])])
-    h = Dense("d1", 10, lr=lr["d1"], initializer=init, constraint=window)(j1)
-    h = Diode("down", direction="down", model=diode)(h)
-    h = Diode("up", direction="up", model=diode)(h)
-    h = Amplifier("amp", gain=4, device=BidirectionalAmplifier(shift=0))(h)
-    j2 = Concatenate("j2")([h, Bias("b2", [1.0])])
-    outputs = [CurrentOutput(gate, readout=Differential())(Dense(f"d_{gate}", 2, lr=lr[gate], initializer=init,
-                                                               constraint=window)(j2))
-               for gate in GATES]
+    xp = Input("xp", 2)
+    xn = Input("xn", 2)
+    b1 = Bias("b1", [1.0])
+    j1 = Concatenate("j1")([xp, xn, b1])
+    d1 = Dense("d1", 10, lr=lr["d1"], initializer=init, constraint=window)(j1)
+    down = Diode("down", direction="down", model=diode)(d1)
+    up = Diode("up", direction="up", model=diode)(down)
+    amp = Amplifier("amp", gain=4, device=BidirectionalAmplifier(vcm=0))(up)
+    b2 = Bias("b2", [1.0])
+    j2 = Concatenate("j2")([amp, b2])
+    outputs = []
+    for gate in GATES:
+        d_gate = Dense(f"d_{gate}", 2, lr=lr[gate], initializer=init, constraint=window)(j2)
+        outputs.append(CurrentOutput(gate, readout=Differential())(d_gate))
     return Model(outputs=outputs)
 
 

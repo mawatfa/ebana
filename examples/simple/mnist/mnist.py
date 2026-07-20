@@ -151,14 +151,18 @@ def build_model(args, steps):
                      lr=learning_rate(args, lr, steps))
 
     # hidden layer: pixels and a 1 V bias row through a crossbar, clamped, amplified
-    rows = Concatenate("rows")([Input("xp", 784), Input("xn", 784), Bias("bias", [1.0])])
-    h = crossbar("d1", args["hidden_units"], args["lr_hidden"])(rows)
-    h = Diode("clamp_hi", "down", model=diode, bias_voltage=args["clamp_hi"])(h)
-    h = Diode("clamp_lo", "up", model=diode, bias_voltage=args["clamp_lo"])(h)
-    h = Amplifier("amp", gain=args["gain"], device=BidirectionalAmplifier(shift=0.0))(h)
+    xp = Input("xp", 784)
+    xn = Input("xn", 784)
+    bias = Bias("bias", [1.0])
+    rows = Concatenate("rows")([xp, xn, bias])
+    d1 = crossbar("d1", args["hidden_units"], args["lr_hidden"])(rows)
+    clamp_hi = Diode("clamp_hi", "down", model=diode, bias_voltage=args["clamp_hi"])(d1)
+    clamp_lo = Diode("clamp_lo", "up", model=diode, bias_voltage=args["clamp_lo"])(clamp_hi)
+    amp = Amplifier("amp", gain=args["gain"], device=BidirectionalAmplifier(vcm=0.0))(clamp_lo)
 
     # output layer: two nets per class, read as their difference
-    out = CurrentOutput("out", readout=Differential())(crossbar("d2", 2 * 10, args["lr_out"])(h))
+    d2 = crossbar("d2", 2 * 10, args["lr_out"])(amp)
+    out = CurrentOutput("out", readout=Differential())(d2)
     return Model(outputs=[out])
 # >>>
 
