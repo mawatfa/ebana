@@ -64,13 +64,16 @@ class Workers:
     n processes (0 runs everything in this process). Every task sends the
     current parameter values. The model, algorithm, loss and probes are
     pickled, so functions they hold must be defined at module level.
+    The workers are spawned, never forked: a forked worker inherits the
+    parent's ngspice state, and pools forked from a process that had already
+    run an OSDI (PSP) circuit hung.
     """
 
     def __init__(self, model, n, algorithm=None, loss=None, probes=None):
         self.model, self.n = model, n
         args = (model, algorithm, loss, probes or {})
         if n:
-            self.pool = multiprocessing.get_context().Pool(n, _start, args)
+            self.pool = multiprocessing.get_context("spawn").Pool(n, _start, args)
         else:
             self.pool = None
             _start(*args)
